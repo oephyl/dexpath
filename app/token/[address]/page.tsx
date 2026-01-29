@@ -125,7 +125,7 @@ export default function TokenDetailPage({ params }: { params: { address: string 
               {token.address.slice(0, 8)}...{token.address.slice(-6)}
             </code>
             <Button variant="ghost" size="sm" onClick={copyAddress} className="h-7 w-7 p-0">
-              {copied ? <Check className="h-2 w-2 text-primary" /> : <Copy className="h-2 w-2" />}
+              {copied ? <Check className="h-1.5 w-1.5 text-primary" /> : <Copy className="h-1.5 w-1.5" />}
             </Button>
           </div>
 

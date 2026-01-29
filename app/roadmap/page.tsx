@@ -5,7 +5,6 @@ import { TopNav } from "@/components/top-nav"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle2, Circle, Clock, Target, TrendingUp, Zap } from "lucide-react"
-import Image from "next/image"
 
 export default function RoadmapPage() {
   const roadmapItems = [
@@ -236,7 +235,6 @@ export default function RoadmapPage() {
       <main className="container mx-auto px-4 py-12 max-w-6xl">
         <div className="mb-16 text-center">
           <div className="flex items-center justify-center gap-3 mb-6">
-            <Image src="/images/logo-only.png" alt="Dexpath" width={64} height={64} />
             <h1 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-primary via-cyan-400 to-primary bg-clip-text text-transparent">
               Roadmap
             </h1>

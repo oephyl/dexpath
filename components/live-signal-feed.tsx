@@ -222,14 +222,14 @@ export function TokenTrending() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-2.5 w-2.5 p-0 hover:bg-primary/20 ml-0.5"
+                        className="size-5 p-0 hover:bg-primary/20 ml-0.5"
                         onClick={(e) => {
                           e.stopPropagation()
                           navigator.clipboard.writeText(token.address)
                         }}
                         title="Copy CA"
                       >
-                        <Copy className="h-1.5 w-1.5 text-muted-foreground" />
+                        <Copy className="size-2.5 text-muted-foreground" />
                       </Button>
                     </div>
                   </div>

@@ -32,9 +32,9 @@ export function mapPumpFunTokenToTokenRow(pumpToken: PumpFunToken): TokenRow {
   const price = pumpToken.price_usd || 0
   const mc = pumpToken.usd_market_cap || 0
 
-  // Calculate random change values since API doesn't provide them
-  const change5m = Math.random() * 100 - 20
-  const change1h = Math.random() * 150 - 30
+  // 5m/1h and volume: use 0 until enriched from DexScreener (no fake random)
+  const change5m = 0
+  const change1h = 0
 
   let timestamp: number
   if (pumpToken.created_timestamp) {
@@ -45,40 +45,8 @@ export function mapPumpFunTokenToTokenRow(pumpToken: PumpFunToken): TokenRow {
     timestamp = Date.now() // Fallback to current time
   }
 
-  // Determine signals based on token properties
+  // New pairs from pump.fun have no DexPaid/Boost/CTO signals yet – only real data from DexScreener should show signals
   const signals: SignalType[] = []
-
-  // High market cap gets KEY_MC
-  if (mc > 1000000) {
-    signals.push("KEY_MC")
-  }
-
-  // Positive 5m change gets PRICE_UP
-  if (change5m > 10) {
-    signals.push("PRICE_UP")
-  }
-
-  // Random chance for paid signals
-  if (Math.random() > 0.7) {
-    const paidSignals: SignalType[] = ["DEXBOOST_PAID", "DEXAD_PAID", "DEXBAR_PAID"]
-    signals.push(paidSignals[Math.floor(Math.random() * paidSignals.length)])
-  }
-
-  // Random chance for CTO
-  if (Math.random() > 0.8) {
-    signals.push("CTO")
-  }
-
-  // Random chance for social update
-  if (pumpToken.twitter || pumpToken.telegram || pumpToken.website) {
-    if (Math.random() > 0.7) {
-      signals.push("UPDATE_SOCIAL")
-    }
-  }
-
-  const boostCount = signals.includes("DEXBOOST_PAID")
-    ? [10, 30, 50, 100, 500][Math.floor(Math.random() * 5)]
-    : undefined
 
   return {
     address: pumpToken.mint,
@@ -90,10 +58,10 @@ export function mapPumpFunTokenToTokenRow(pumpToken: PumpFunToken): TokenRow {
     change1h: change1h,
     mc: mc,
     liquidity: (pumpToken.virtual_sol_reserves || 0) * 150,
-    volume24h: mc * 0.3,
+    volume24h: 0,
     updatedAt: new Date(timestamp).toISOString(), // Use properly handled timestamp
-    signals: signals,
-    boostCount: boostCount,
+    signals,
+    boostCount: undefined,
     launchpad: "pumpfun",
   }
 }
@@ -128,8 +96,29 @@ export async function fetchPumpFunTokens(): Promise<TokenRow[]> {
 
     console.log("[v0] Mapped tokens count:", pumpTokens.length)
 
-    // Map to TokenRow format
     const mappedTokens = pumpTokens.slice(0, 20).map(mapPumpFunTokenToTokenRow)
+
+    // Enrich with DexScreener for real 5m, vol, liquidity when token has a pair
+    for (let i = 0; i < mappedTokens.length; i++) {
+      const row = mappedTokens[i]
+      try {
+        const enriched = await enrichTokenFromDexScreener(row.address, "solana")
+        if (enriched) {
+          mappedTokens[i] = {
+            ...row,
+            price: Number.parseFloat(enriched.priceUsd || "0") || row.price,
+            mc: enriched.marketCap ?? row.mc,
+            change5m: enriched.priceChange5m ?? 0,
+            change1h: enriched.priceChange1h ?? 0,
+            volume24h: enriched.volume24h ?? 0,
+            liquidity: enriched.liquidity ?? row.liquidity,
+          }
+        }
+      } catch {
+        // keep pump.fun data if enrichment fails
+      }
+    }
+
     console.log("[v0] Returning tokens:", mappedTokens.length)
     return mappedTokens
   } catch (error) {
@@ -221,6 +210,143 @@ export function mapCTOTokenToTokenRow(ctoToken: CTOToken): TokenRow {
     signals: signals,
     boostCount: undefined,
     launchpad: undefined,
+  }
+}
+
+export interface DexScreenerAd {
+  chainId?: string
+  tokenAddress?: string
+  date?: string
+  type?: string
+  durationHours?: number
+  impressions?: number
+}
+
+export interface DexScreenerBoost {
+  chainId?: string
+  tokenAddress?: string
+  amount?: number
+  totalAmount?: number
+  icon?: string
+  header?: string
+  description?: string
+  name?: string
+  symbol?: string
+}
+
+async function enrichTokenFromDexScreener(
+  tokenAddress: string,
+  chainId: string = "solana",
+): Promise<{ priceUsd?: string; marketCap?: number; liquidity?: number; volume24h?: number; priceChange5m?: number; priceChange1h?: number; name?: string; symbol?: string; imageUrl?: string } | null> {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const pairs = data.pairs ?? (Array.isArray(data) ? data : [])
+    const pair = pairs[0]
+    if (!pair) return null
+    return {
+      priceUsd: pair.priceUsd,
+      marketCap: pair.fdv ?? pair.marketCap,
+      liquidity: pair.liquidity?.usd,
+      volume24h: pair.volume?.h24,
+      priceChange5m: pair.priceChange?.m5,
+      priceChange1h: pair.priceChange?.h1,
+      name: pair.baseToken?.name,
+      symbol: pair.baseToken?.symbol,
+      imageUrl: pair.info?.imageUrl,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function mapDexPaidAdToTokenRow(ad: DexScreenerAd, enriched: Awaited<ReturnType<typeof enrichTokenFromDexScreener>>): TokenRow {
+  const address = ad.tokenAddress || "unknown"
+  const chainId = ad.chainId || "solana"
+  const signals: SignalType[] = ["DEXAD_PAID"]
+  return {
+    address,
+    name: enriched?.name || "Unknown",
+    symbol: enriched?.symbol || address.slice(0, 6).toUpperCase(),
+    logo: enriched?.imageUrl || "/placeholder.svg?height=32&width=32",
+    price: Number.parseFloat(enriched?.priceUsd || "0"),
+    change5m: enriched?.priceChange5m ?? 0,
+    change1h: enriched?.priceChange1h ?? 0,
+    mc: enriched?.marketCap ?? 0,
+    liquidity: enriched?.liquidity ?? 0,
+    volume24h: enriched?.volume24h ?? 0,
+    updatedAt: new Date().toISOString(),
+    signals,
+    boostCount: undefined,
+    launchpad: undefined,
+  }
+}
+
+export function mapBoostToTokenRow(boost: DexScreenerBoost, enriched: Awaited<ReturnType<typeof enrichTokenFromDexScreener>>): TokenRow {
+  const address = boost.tokenAddress || "unknown"
+  const amount = boost.amount ?? boost.totalAmount ?? 0
+  const signals: SignalType[] = ["DEXBOOST_PAID"]
+  return {
+    address,
+    name: enriched?.name ?? boost.name ?? "Unknown",
+    symbol: enriched?.symbol ?? boost.symbol ?? address.slice(0, 6).toUpperCase(),
+    logo: enriched?.imageUrl ?? boost.icon ?? "/placeholder.svg?height=32&width=32",
+    price: Number.parseFloat(enriched?.priceUsd || "0"),
+    change5m: enriched?.priceChange5m ?? 0,
+    change1h: enriched?.priceChange1h ?? 0,
+    mc: enriched?.marketCap ?? 0,
+    liquidity: enriched?.liquidity ?? 0,
+    volume24h: enriched?.volume24h ?? 0,
+    updatedAt: new Date().toISOString(),
+    signals,
+    boostCount: typeof amount === "number" && amount > 0 ? amount : undefined,
+    launchpad: undefined,
+  }
+}
+
+export async function fetchDexPaidTokens(): Promise<TokenRow[]> {
+  try {
+    const response = await fetch("/api/ads")
+    if (!response.ok) return []
+    const data = await response.json()
+    const ads: DexScreenerAd[] = Array.isArray(data) ? data : []
+    const chainId = "solana"
+    const results: TokenRow[] = []
+    for (const ad of ads.slice(0, 20)) {
+      const addr = ad.tokenAddress
+      if (!addr) continue
+      const enriched = await enrichTokenFromDexScreener(addr, chainId)
+      results.push(mapDexPaidAdToTokenRow(ad, enriched))
+    }
+    return results
+  } catch (error) {
+    console.error("[v0] Error fetching DexPaid tokens:", error)
+    return []
+  }
+}
+
+export async function fetchBoostTokens(): Promise<TokenRow[]> {
+  try {
+    const response = await fetch("/api/token-boosts")
+    if (!response.ok) return []
+    const data = await response.json()
+    const boosts: DexScreenerBoost[] = Array.isArray(data) ? data : data?.tokenAddress ? [data] : []
+    const chainId = "solana"
+    const results: TokenRow[] = []
+    for (const boost of boosts.slice(0, 20)) {
+      const addr = boost.tokenAddress
+      if (!addr) continue
+      const enriched = await enrichTokenFromDexScreener(addr, chainId)
+      results.push(mapBoostToTokenRow(boost, enriched))
+    }
+    return results
+  } catch (error) {
+    console.error("[v0] Error fetching Boost tokens:", error)
+    return []
   }
 }
 

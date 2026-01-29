@@ -54,14 +54,14 @@ export function FeaturedAdToken({ index = 0 }: { index?: number }) {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-2.5 w-2.5 p-0 hover:bg-primary/20 ml-0.5"
+                  className="size-5 p-0 hover:bg-primary/20 ml-0.5"
                   onClick={(e) => {
                     e.stopPropagation()
                     navigator.clipboard.writeText(token.address)
                   }}
                   title="Copy CA"
                 >
-                  <Copy className="text-muted-foreground w-1.5 h-1.5" />
+                  <Copy className="size-2.5 text-muted-foreground" />
                 </Button>
               </div>
             </div>

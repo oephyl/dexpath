@@ -24,7 +24,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { fetchCTOTokens } from "@/lib/api"
+import { fetchCTOTokens, fetchDexPaidTokens, fetchBoostTokens } from "@/lib/api"
 
 interface TokenTableProps {
   tokens: TokenRow[]
@@ -192,6 +192,10 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   const [ctoTokens, setCtoTokens] = useState<TokenRow[]>([])
   const [loadingCTO, setLoadingCTO] = useState(false)
   const [ctoRateLimited, setCtoRateLimited] = useState(false)
+  const [dexpaidTokens, setDexpaidTokens] = useState<TokenRow[]>([])
+  const [boostTokens, setBoostTokens] = useState<TokenRow[]>([])
+  const [loadingDexpaid, setLoadingDexpaid] = useState(false)
+  const [loadingBoost, setLoadingBoost] = useState(false)
   const [showPrelaunchForm, setShowPrelaunchForm] = useState(false)
   const [prelaunchForm, setPrelaunchForm] = useState({
     tokenName: "",
@@ -228,76 +232,40 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   }, [trackingData])
 
   useEffect(() => {
-    if (activeTab === "cto") {
-      let isInitialLoad = true
+    if (activeTab !== "cto") return
+  }, [activeTab])
 
-      const loadCTO = async () => {
-        if (ctoRateLimited) {
-          console.log("[v0] Skipping CTO fetch - rate limited")
-          return
-        }
-
-        console.log("[v0] Loading CTO tokens...")
-        if (isInitialLoad) {
-          setLoadingCTO(true)
-        }
-        try {
-          const tokens = await fetchCTOTokens()
-          console.log("[v0] Loaded CTO tokens:", tokens.length)
-
-          if ((tokens as any).rateLimit) {
-            console.log("[v0] CTO API is rate limited")
-            setCtoRateLimited(true)
-            setTimeout(
-              () => {
-                console.log("[v0] Resetting CTO rate limit status")
-                setCtoRateLimited(false)
-              },
-              5 * 60 * 1000,
-            )
-            return
-          }
-
-          const now = new Date()
-          const tokensWithTime = tokens.map((token) => {
-            // If token already seen, preserve its original timestamp
-            const existingToken = ctoTokensWithTime.find((t) => t.address === token.address)
-            if (existingToken) {
-              return existingToken
-            }
-
-            // New token - add discovery timestamp
-            if (!seenCTOTokens.current.has(token.address)) {
-              seenCTOTokens.current.add(token.address)
-              return {
-                ...token,
-                timestamp: now.toISOString(),
-                updated: now.toISOString(),
-              }
-            }
-
-            return token
-          })
-
-          setCtoTokensWithTime(tokensWithTime)
-          setCtoTokens(tokensWithTime)
-        } catch (error) {
-          console.error("[v0] Error loading CTO tokens:", error)
-        } finally {
-          if (isInitialLoad) {
-            setLoadingCTO(false)
-            isInitialLoad = false
-          }
-        }
-      }
-
-      loadCTO() // Initial load
-
-      // Poll every 10 seconds for new CTO data
-      const interval = setInterval(loadCTO, 10000)
-      return () => clearInterval(interval)
+  useEffect(() => {
+    if (activeTab !== "dexpaid") return
+    let cancelled = false
+    setLoadingDexpaid(true)
+    fetchDexPaidTokens()
+      .then((tokens) => {
+        if (!cancelled) setDexpaidTokens(tokens)
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDexpaid(false)
+      })
+    return () => {
+      cancelled = true
     }
-  }, [activeTab, ctoTokensWithTime, ctoRateLimited])
+  }, [activeTab])
+
+  useEffect(() => {
+    if (activeTab !== "boost") return
+    let cancelled = false
+    setLoadingBoost(true)
+    fetchBoostTokens()
+      .then((tokens) => {
+        if (!cancelled) setBoostTokens(tokens)
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingBoost(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab])
 
   const handleCopyWallet = (wallet: string) => {
     navigator.clipboard.writeText(wallet)
@@ -364,26 +332,39 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     setIsPrelaunchModalOpen(true)
   }
 
-  const filteredTokens = initialTokens.filter((token) => {
+  const filteredTokens = (() => {
     if (activeTab === "new") {
-      if (launchpadFilter === "all") return true
-      return token.launchpad === launchpadFilter
+      return initialTokens.filter((token) => {
+        if (launchpadFilter === "all") return true
+        return token.launchpad === launchpadFilter
+      })
     }
-
+    if (activeTab === "dexpaid") {
+      return dexpaidTokens
+    }
     if (activeTab === "boost") {
-      // This filter logic needs to be defined based on how boostFilter is used
-      // For now, assuming it might filter based on a 'boostLevel' or similar property on TokenRow
-      // Example: return token.boostLevel === boostFilter;
-      return true // Placeholder
+      if (boostFilter === "all") return boostTokens
+      const minBoost: Record<string, number> = {
+        "10x": 10,
+        "30x": 30,
+        "50x": 50,
+        "100x": 100,
+        "500x": 500,
+      }
+      const min = minBoost[boostFilter]
+      if (min == null) return boostTokens
+      return boostTokens.filter((t) => (t.boostCount ?? 0) >= min)
     }
-
     if (activeTab === "cto") {
-      return ctoTokens.some((ct) => ct.address === token.address)
+      return ctoTokens
     }
-
-    // Add other tab filtering logic here if necessary
-    return true // Default to showing all if no specific filter matches
-  })
+    if (activeTab === "signals") {
+      const byAddress = new Map<string, TokenRow>()
+      ;[...dexpaidTokens, ...boostTokens, ...ctoTokens].forEach((t) => byAddress.set(t.address, t))
+      return Array.from(byAddress.values())
+    }
+    return initialTokens
+  })()
 
   return (
     <Card>
@@ -462,7 +443,6 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
         {(activeTab === "new" ||
           activeTab === "dexpaid" ||
           activeTab === "boost" ||
-          activeTab === "cto" ||
           activeTab === "ads" ||
           activeTab === "signals") && (
           <div className={activeTab === "boost" ? "mt-2 flex justify-between items-center" : "mt-2 flex justify-end"}>
@@ -780,9 +760,8 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                 </DialogContent>
               </Dialog>
             </div>
-            <div className="h-[600px] overflow-auto">
-              <Table>
-                <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
+            <Table wrapperClassName="h-[600px] overflow-auto overflow-x-auto">
+              <TableHeader className="shadow-sm">
                   <TableRow className="hover:bg-transparent border-border">
                     <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                       Token
@@ -838,7 +817,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                                 handleCopyWallet(project.devWallet)
                               }}
                             >
-                              <Copy className="h-1.5 w-1.5" />
+                              <Copy className="h-1 w-1" />
                             </Button>
                           </div>
                         </TableCell>
@@ -848,7 +827,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                         <TableCell className="text-center py-2 px-4">
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center justify-center gap-1 text-[9px] sm:text-xs text-muted-foreground">
-                              <Copy className="h-2 w-2" />
+                              <Copy className="h-1.5 w-1.5" />
                               <span>{tracking.copyCount}</span>
                             </div>
                             <div className="flex items-center justify-center gap-1 text-[9px] sm:text-xs text-amber-500">
@@ -885,169 +864,38 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                   })}
                 </TableBody>
               </Table>
-            </div>
           </>
         ) : activeTab === "cto" ? (
-          loadingCTO ? (
-            <div className="text-center py-8 text-muted-foreground text-sm">
-              <Construction className="h-8 w-8 mx-auto mb-2" />
-              Loading Community Takeovers...
+          <div className="flex flex-col items-center justify-center h-[600px] space-y-4">
+            <Construction className="h-16 w-16 text-muted-foreground/50" />
+            <div className="text-center space-y-2">
+              <h3 className="text-xl font-semibold text-foreground">Coming Soon</h3>
+              <p className="text-muted-foreground max-w-md">
+                CTO (Community Takeover) signals are under development. Check back soon!
+              </p>
             </div>
-          ) : ctoTokens.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground text-sm">
-              <Construction className="h-8 w-8 mx-auto mb-2" />
-              No Community Takeovers found
-            </div>
-          ) : ctoRateLimited ? (
-            <div className="flex flex-col items-center justify-center h-[600px] space-y-4">
-              <Construction className="h-16 w-16 text-red-500 animate-pulse" />
-              <div className="text-center space-y-2">
-                <h3 className="text-xl font-semibold text-red-500">Rate Limited</h3>
-                <p className="text-muted-foreground max-w-md">
-                  We've been rate limited by the CTO API. Please try again in a few minutes.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="max-h-[600px] overflow-auto">
-              <Table>
-                <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
-                  <TableRow className="hover:bg-transparent border-border">
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                      Token
-                    </TableHead>
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                      MC
-                    </TableHead>
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                      Price
-                    </TableHead>
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                      5m
-                    </TableHead>
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                      Vol(24h)
-                    </TableHead>
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                      Signals
-                    </TableHead>
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                      Updated
-                    </TableHead>
-                    <TableHead className="font-semibold text-foreground text-center text-[10px] sm:text-xs bg-background px-4">
-                      Buy
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {ctoTokens.map((token) => (
-                    <TableRow
-                      key={token.address}
-                      className="border-border hover:bg-secondary/50 cursor-pointer"
-                      onClick={() => {
-                        if (onTokenClick) {
-                          onTokenClick(token)
-                        } else {
-                          localStorage.setItem(`token_${token.address}`, JSON.stringify(token))
-                          router.push(`/token/${token.address}`)
-                        }
-                      }}
-                    >
-                      <TableCell className="py-2 px-4">
-                        <div className="flex items-center gap-2">
-                          <Image
-                            src={token.logo || "/placeholder.svg"}
-                            alt={token.symbol}
-                            width={24}
-                            height={24}
-                            className="rounded-full object-cover flex-shrink-0"
-                          />
-                          <div className="flex flex-col">
-                            <span className="font-medium text-[9px] sm:text-[10px] truncate max-w-[120px]">
-                              {token.name}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <span className="text-muted-foreground text-[8px] sm:text-[9px]">{token.symbol}</span>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-auto p-0 hover:bg-transparent"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  navigator.clipboard.writeText(token.address)
-                                }}
-                                title="Copy CA"
-                              >
-                                <Copy className="h-1.5 w-1.5 text-muted-foreground" />
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-[9px] sm:text-[10px] py-2 px-4">
-                        {formatMarketCap(token.mc)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-[9px] sm:text-[10px] py-2 px-4">
-                        {formatPrice(token.price)}
-                      </TableCell>
-                      <TableCell className="text-right py-2 px-4">
-                        <span
-                          className={`font-semibold text-[9px] sm:text-[10px] ${
-                            token.change5m >= 0 ? "text-green-500" : "text-red-500"
-                          }`}
-                        >
-                          {token.change5m >= 0 ? "+" : ""}
-                          {token.change5m.toFixed(2)}%
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-[9px] sm:text-[10px] py-2 px-4">
-                        ${formatNumber(token.volume24h)}
-                      </TableCell>
-                      <TableCell className="py-2 px-4">
-                        <div className="flex gap-1 flex-wrap">
-                          {token.signals.slice(0, 3).map((signal, index) => (
-                            <SignalBadge key={index} type={signal} boostCount={token.boostCount} />
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-[9px] sm:text-[10px] py-2 px-4">
-                        {new Date(token.updatedAt).toLocaleTimeString()}
-                      </TableCell>
-                      <TableCell className="text-center py-2 px-4">
-                        <div className="flex justify-center gap-1">
-                          {[
-                            { name: "Trojan", img: "/images/trojan.png" },
-                            { name: "Axion", img: "/images/axiom.png" },
-                            { name: "GMGN", img: "/images/gmgn.png" },
-                            { name: "Bonk", img: "/images/bonk.png" },
-                          ].map((platform) => (
-                            <Button
-                              key={platform.name}
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 w-6 p-0 hover:bg-primary/20"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                window.open(`https://${platform.name.toLowerCase()}.com`, "_blank")
-                              }}
-                              title={`Buy on ${platform.name}`}
-                            >
-                              <Image
-                                src={platform.img || "/placeholder.svg"}
-                                alt={platform.name}
-                                width={16}
-                                height={16}
-                              />
-                            </Button>
-                          ))}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )
+          </div>
+        ) : activeTab === "dexpaid" && loadingDexpaid ? (
+          <div className="flex flex-col items-center justify-center h-[600px] space-y-4">
+            <Construction className="h-16 w-16 text-muted-foreground/50 animate-pulse" />
+            <p className="text-sm text-muted-foreground">Loading DexPaid tokens...</p>
+          </div>
+        ) : activeTab === "boost" && loadingBoost ? (
+          <div className="flex flex-col items-center justify-center h-[600px] space-y-4">
+            <Construction className="h-16 w-16 text-muted-foreground/50 animate-pulse" />
+            <p className="text-sm text-muted-foreground">Loading Boost tokens...</p>
+          </div>
+        ) : (activeTab === "dexpaid" || activeTab === "boost" || activeTab === "signals") && filteredTokens.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-[600px] space-y-4">
+            <Construction className="h-16 w-16 text-muted-foreground/50" />
+            <p className="text-sm text-muted-foreground">
+              {activeTab === "dexpaid"
+                ? "No DexPaid tokens right now."
+                : activeTab === "boost"
+                  ? "No Boost tokens right now."
+                  : "No signals data yet. Try DexPaid or Boost tabs."}
+            </p>
+          </div>
         ) : (
           <>
             {/* Empty states for non-Pumpfun launchpads */}
@@ -1072,32 +920,33 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
               </div>
             ) : (
               <>
-                <div className="h-[600px] overflow-auto">
-                  <Table>
-                    <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
+                <Table wrapperClassName="h-[600px] overflow-auto overflow-x-auto" className="w-full min-w-[960px]">
+                  <TableHeader className="shadow-sm">
                       <TableRow className="hover:bg-transparent border-border">
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background pl-4 pr-3 py-3 text-left min-w-[200px]">
                           Token
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 py-3 text-right min-w-[88px]">
                           MC
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 py-3 text-right min-w-[80px]">
                           Price
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 py-3 text-right min-w-[56px]">
                           5m
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 py-3 text-right min-w-[88px]">
                           Vol(24h)
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                          Signals
-                        </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                        {activeTab !== "new" && (
+                          <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 py-3 text-left min-w-[100px]">
+                            Signals
+                          </TableHead>
+                        )}
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 py-3 text-right min-w-[72px]">
                           Updated
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background text-center px-4">
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background pl-3 pr-4 py-3 text-center min-w-[112px]">
                           Buy
                         </TableHead>
                       </TableRow>
@@ -1111,44 +960,44 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                             newestTokenAddress === token.address ? "animate-slide-in" : ""
                           }`}
                         >
-                          <TableCell className="py-2 px-4">
-                            <div className="flex items-center gap-2">
+                          <TableCell className="py-3 pl-4 pr-3 text-left align-middle">
+                            <div className="flex items-center gap-2 min-w-0">
                               <Image
                                 src={token.logo || "/placeholder.svg"}
                                 alt={token.symbol}
                                 width={28}
                                 height={28}
-                                className="rounded-full object-cover"
+                                className="rounded-full object-cover shrink-0"
                               />
-                              <div className="flex flex-col">
-                                <span className="font-semibold text-foreground text-[10px] sm:text-xs truncate max-w-[120px]">
+                              <div className="flex flex-col min-w-0">
+                                <span className="font-semibold text-foreground text-[10px] sm:text-xs truncate">
                                   {token.name}
                                 </span>
                                 <div className="flex items-center gap-1">
-                                  <span className="text-[9px] sm:text-xs text-muted-foreground">{token.symbol}</span>
+                                  <span className="text-[9px] sm:text-xs text-muted-foreground truncate">{token.symbol}</span>
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    className="h-3 w-3 p-0 hover:bg-primary/20"
+                                    className="size-6 shrink-0 p-0 hover:bg-primary/20"
                                     onClick={(e) => {
                                       e.stopPropagation()
                                       navigator.clipboard.writeText(token.address)
                                     }}
                                     title="Copy Contract Address"
                                   >
-                                    <Copy className="h-1.5 w-1.5 text-muted-foreground" />
+                                    <Copy className="size-2.5 text-muted-foreground" />
                                   </Button>
                                 </div>
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="text-right font-mono text-[10px] sm:text-xs py-2 px-4">
+                          <TableCell className="py-3 px-4 text-right font-mono text-[10px] sm:text-xs align-middle whitespace-nowrap">
                             {formatMarketCap(token.mc)}
                           </TableCell>
-                          <TableCell className="text-right font-mono text-[10px] sm:text-xs py-2 px-4">
+                          <TableCell className="py-3 px-4 text-right font-mono text-[10px] sm:text-xs align-middle whitespace-nowrap">
                             {formatPrice(token.price)}
                           </TableCell>
-                          <TableCell className="text-right py-2 px-4">
+                          <TableCell className="py-3 px-4 text-right align-middle whitespace-nowrap">
                             <span
                               className={`font-semibold text-[10px] sm:text-xs ${token.change5m >= 0 ? "text-green-500" : "text-red-500"}`}
                             >
@@ -1156,31 +1005,33 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                               {token.change5m.toFixed(1)}%
                             </span>
                           </TableCell>
-                          <TableCell className="text-right font-mono text-[10px] sm:text-xs py-2 px-4">
+                          <TableCell className="py-3 px-4 text-right font-mono text-[10px] sm:text-xs align-middle whitespace-nowrap">
                             {formatNumber(token.volume24h)}
                           </TableCell>
-                          <TableCell className="py-2 px-4">
-                            <div className="flex flex-wrap gap-1">
-                              {token.signals.slice(0, 5).map((signal, idx) => (
-                                <SignalBadge
-                                  key={idx}
-                                  type={signal}
-                                  size="sm"
-                                  iconOnly
-                                  boostCount={signal === "DEXBOOST_PAID" ? token.boostCount : undefined}
-                                />
-                              ))}
-                              {token.signals.length > 5 && (
-                                <span className="text-[9px] sm:text-xs text-muted-foreground">
-                                  +{token.signals.length - 5}
-                                </span>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right text-[9px] sm:text-xs text-muted-foreground py-2 px-4">
+                          {activeTab !== "new" && (
+                            <TableCell className="py-3 px-4 text-left align-middle">
+                              <div className="flex flex-wrap gap-1">
+                                {token.signals.slice(0, 5).map((signal, idx) => (
+                                  <SignalBadge
+                                    key={idx}
+                                    type={signal}
+                                    size="sm"
+                                    iconOnly
+                                    boostCount={signal === "DEXBOOST_PAID" ? token.boostCount : undefined}
+                                  />
+                                ))}
+                                {token.signals.length > 5 && (
+                                  <span className="text-[9px] sm:text-xs text-muted-foreground">
+                                    +{token.signals.length - 5}
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                          )}
+                          <TableCell className="py-3 px-4 text-right text-[9px] sm:text-xs text-muted-foreground align-middle whitespace-nowrap">
                             {getTimeAgo(token.updatedAt)}
                           </TableCell>
-                          <TableCell className="py-2 px-4">
+                          <TableCell className="py-3 pl-3 pr-4 text-center align-middle">
                             <div className="flex gap-1 justify-center">
                               <Button
                                 size="sm"
@@ -1230,7 +1081,6 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                       ))}
                     </TableBody>
                   </Table>
-                </div>
               </>
             )}
           </>
@@ -1298,7 +1148,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                           handleCopyWallet(selectedPrelaunch.devWallet)
                         }}
                       >
-                        <Copy className="h-2 w-2 mr-1" />
+                        <Copy className="h-1.5 w-1.5 mr-1" />
                         Copy
                       </Button>
                     </div>
@@ -1323,7 +1173,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-secondary/30 rounded-lg p-4 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Copy className="h-3 w-3 text-muted-foreground" />
+                      <Copy className="h-1.5 w-1.5 text-muted-foreground" />
                       <span className="text-sm sm:text-sm">Wallet Copies</span>
                     </div>
                     <span className="text-2xl sm:text-2xl font-bold">

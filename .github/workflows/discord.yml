@@ -1,21 +1,30 @@
-name: Discord Notify
+name: Discord Notifications (All Updates)
 
 on:
   push:
-    branches: ["main", "master"]
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+  issues:
+    types: [opened, reopened, edited, closed]
+  issue_comment:
+    types: [created]
+  release:
+    types: [published]
+  workflow_run:
+    workflows: ["*"]
+    types: [completed]
 
 jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - name: Send Discord message
+      - name: Send notification to Discord
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          EVENT_NAME: ${{ github.event_name }}
           REPO: ${{ github.repository }}
           ACTOR: ${{ github.actor }}
-          SHA: ${{ github.sha }}
           REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          SERVER_URL: ${{ github.server_url }}
         run: |
-          curl -sS -H "Content-Type: application/json" \
-          -d "{\"content\":\"✅ **${REPO}** new push on **${REF}** by **${ACTOR}**\\nhttps://github.com/${REPO}/commit/${SHA}\"}" \
-          "$DISCORD_WEBHOOK"

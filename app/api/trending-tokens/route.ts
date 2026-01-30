@@ -1,11 +1,7 @@
 export async function GET() {
   try {
     const response = await fetch("https://pump-api-pi.vercel.app/api/v1/trending", {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
+      cache: "no-store"
     })
 
     if (!response.ok) {

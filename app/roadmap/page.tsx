@@ -1,10 +1,12 @@
 "use client"
 
+
 import { Suspense } from "react"
 import { TopNav } from "@/components/top-nav"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle2, Circle, Clock, Target, TrendingUp, Zap } from "lucide-react"
+import Image from "next/image"
 
 export default function RoadmapPage() {
   const roadmapItems = [
@@ -210,112 +212,81 @@ export default function RoadmapPage() {
       completed: {
         label: "Completed",
         color: "bg-green-500/20 text-green-400 border-green-500/30",
-        icon: CheckCircle2,
+        icon: <CheckCircle2 className="h-4 w-4 animate-pulse text-green-400" />,
       },
-      "in-progress": { label: "In Progress", color: "bg-blue-500/20 text-blue-400 border-blue-500/30", icon: Clock },
-      planned: { label: "Planned", color: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Target },
-      future: { label: "Future", color: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: TrendingUp },
+      "in-progress": {
+        label: "In Progress",
+        color: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+        icon: <Clock className="h-4 w-4 animate-spin-slow text-blue-400" />,
+      },
+      planned: {
+        label: "Planned",
+        color: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+        icon: <Target className="h-4 w-4 text-purple-400" />,
+      },
+      future: {
+        label: "Future",
+        color: "bg-gray-500/20 text-gray-400 border-gray-500/30",
+        icon: <TrendingUp className="h-4 w-4 text-gray-400" />,
+      },
     }
     const variant = variants[status as keyof typeof variants]
-    const Icon = variant.icon
     return (
-      <Badge className={`${variant.color} flex items-center gap-1.5 px-3 py-1`}>
-        <Icon className="h-3.5 w-3.5" />
-        {variant.label}
-      </Badge>
+      <Badge className={`${variant.color} flex items-center gap-1.5 px-3 py-1 shadow-sm backdrop-blur-md`}>{variant.icon}{variant.label}</Badge>
     )
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative overflow-x-hidden">
       <Suspense fallback={null}>
         <TopNav searchQuery="" onSearchChange={() => {}} />
       </Suspense>
 
-      <main className="container mx-auto px-4 py-12 max-w-6xl">
-        <div className="mb-16 text-center">
-          <div className="flex items-center justify-center gap-3 mb-6">
-            <h1 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-primary via-cyan-400 to-primary bg-clip-text text-transparent">
+      <main className="container mx-auto px-4 py-8 md:py-12 max-w-6xl relative z-10 font-sans">
+        <div className="mb-10 md:mb-16 text-center">
+          <div className="flex items-center justify-center gap-3 mb-4 md:mb-6">
+            <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight text-primary" style={{fontFamily:'system-ui,Segoe UI,Arial,sans-serif'}}>
               Roadmap
             </h1>
           </div>
-          <p className="text-xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
-            Our vision for building the most powerful Solana trading terminal with advanced features, AI intelligence,
-            and multi-chain support. Track our progress from foundation to ecosystem expansion.
+          <p className="text-base md:text-lg text-muted-foreground max-w-2xl mx-auto leading-normal md:leading-relaxed" style={{fontFamily:'system-ui,Segoe UI,Arial,sans-serif'}}>
+            Our vision for building the most powerful Solana trading terminal with advanced features, AI intelligence, and multi-chain support. Track our progress from foundation to ecosystem expansion.
           </p>
         </div>
 
-        <div className="grid md:grid-cols-4 gap-4 mb-12">
-          {[
-            { label: "Completed", count: roadmapItems[0].items.length, icon: CheckCircle2, color: "text-green-500" },
-            {
-              label: "In Progress",
-              count: roadmapItems[1].items.filter((i) => !i.done).length,
-              icon: Clock,
-              color: "text-blue-500",
-            },
-            {
-              label: "Planned",
-              count: roadmapItems[2].items.length + roadmapItems[3].items.length,
-              icon: Target,
-              color: "text-purple-500",
-            },
-            { label: "Future", count: roadmapItems[4].items.length, icon: TrendingUp, color: "text-gray-400" },
-          ].map((stat, i) => (
-            <Card key={i} className="bg-secondary/30 border-primary/20">
-              <CardContent className="pt-5 pb-4 text-center">
-                <stat.icon className={`h-7 w-7 ${stat.color} mx-auto mb-2`} />
-                <div className="text-3xl font-bold mb-1">{stat.count}</div>
-                <div className="text-xs text-muted-foreground">{stat.label}</div>
+
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
+          {roadmapItems.map((quarter, idx) => (
+            <Card key={idx} className="border border-border bg-background/80 shadow-sm">
+              <CardHeader className="pb-2">
+                <div className="flex items-center gap-3 mb-1">
+                  <h2 className="text-lg md:text-xl font-bold text-primary tracking-tight font-sans">{quarter.quarter}</h2>
+                  {getStatusBadge(quarter.status)}
+                </div>
+                <h3 className="text-sm md:text-base font-semibold text-primary mb-1 font-sans">{quarter.theme}</h3>
+                <p className="text-xs md:text-sm text-muted-foreground mb-2 font-sans">{quarter.description}</p>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <ul className="space-y-2 md:space-y-3">
+                  {quarter.items.map((item, itemIdx) => (
+                    <li key={itemIdx} className="flex items-start gap-2">
+                      {item.done ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-500 mt-1" />
+                      ) : quarter.status === "in-progress" ? (
+                        <Clock className="h-4 w-4 text-blue-500 mt-1" />
+                      ) : (
+                        <Circle className="h-4 w-4 text-muted-foreground mt-1" />
+                      )}
+                      <div>
+                        <div className={item.done ? "text-green-600 font-semibold text-sm sm:text-base font-sans" : "font-medium text-sm sm:text-base font-sans"}>{item.title}</div>
+                        <div className="text-xs sm:text-sm text-muted-foreground leading-snug font-sans">{item.desc}</div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               </CardContent>
             </Card>
-          ))}
-        </div>
-
-        <div className="relative space-y-12">
-          {/* Vertical line */}
-          <div className="absolute left-8 top-0 bottom-0 w-0.5 bg-border hidden md:block" />
-
-          {roadmapItems.map((quarter, idx) => (
-            <div key={idx} className="relative">
-              {/* Quarter marker */}
-              <div className="flex items-start gap-4 mb-6">
-                <div className="relative z-10 flex items-center justify-center w-16 h-16 rounded-full bg-background border-2 border-primary flex-shrink-0">
-                  <span className="text-sm font-bold text-primary">{quarter.quarter.split(" ")[0]}</span>
-                </div>
-                <div className="flex-1 pt-2">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h2 className="text-3xl font-bold">{quarter.quarter}</h2>
-                    {getStatusBadge(quarter.status)}
-                  </div>
-                  <h3 className="text-xl font-semibold text-primary mb-1">{quarter.theme}</h3>
-                  <p className="text-sm text-muted-foreground">{quarter.description}</p>
-                </div>
-              </div>
-
-              {/* Items */}
-              <div className="md:ml-24 grid gap-4">
-                {quarter.items.map((item, itemIdx) => (
-                  <Card key={itemIdx} className={item.done ? "border-primary/50 bg-primary/5" : "bg-secondary/30"}>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="flex items-start gap-3 text-lg">
-                        {item.done ? (
-                          <CheckCircle2 className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
-                        ) : quarter.status === "in-progress" ? (
-                          <Clock className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" />
-                        ) : (
-                          <Circle className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0" />
-                        )}
-                        <span className={item.done ? "text-green-500" : ""}>{item.title}</span>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-0 pl-11">
-                      <p className="text-sm text-muted-foreground leading-relaxed">{item.desc}</p>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
           ))}
         </div>
 

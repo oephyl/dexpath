@@ -1,0 +1,35 @@
+/* Complete font reset and Space Grotesk implementation */
+
+/* Import fonts first */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+/* Override all font declarations */
+html, body, div, span, applet, object, iframe,
+h1, h2, h3, h4, h5, h6, p, blockquote, pre,
+a, abbr, acronym, address, big, cite, code,
+del, dfn, em, img, ins, kbd, q, s, samp,
+small, strike, strong, sub, sup, tt, var,
+b, u, i, center,
+dl, dt, dd, ol, ul, li,
+fieldset, form, label, legend,
+table, caption, tbody, tfoot, thead, tr, th, td,
+article, aside, canvas, details, embed, 
+figure, figcaption, footer, header, hgroup, 
+menu, nav, output, ruby, section, summary,
+time, mark, audio, video, input, textarea, select, button {
+  font-family: 'Space Grotesk', Arial, sans-serif !important;
+}
+
+code, pre, .font-mono, kbd, samp, tt {
+  font-family: 'JetBrains Mono', 'Courier New', monospace !important;
+}
+
+/* Ensure Tailwind respects our font choices */
+.font-sans {
+  font-family: 'Space Grotesk', Arial, sans-serif !important;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', 'Courier New', monospace !important;
+}

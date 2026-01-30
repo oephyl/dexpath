@@ -23,6 +23,8 @@ export type TokenRow = {
   signals: SignalType[]
   boostCount?: number
   launchpad?: string // Added to support filtering by launchpad (pumpfun, bags, heaven, etc.)
+  mint?: string // Mint address
+  creator?: string // Creator address
 }
 
 export type SignalEvent = {
@@ -56,6 +58,8 @@ export const tokens: TokenRow[] = [
     signals: ["DEXBOOST_PAID", "PRICE_UP", "KEY_MC"],
     boostCount: 30,
     launchpad: "pumpfun", // Added launchpad property
+    mint: "7xKXtLg9vM2nQ8sP1jF3hR9bY2mW5cT6vL8xN9qA1dE3",
+    creator: "JHUYx8K2mP9qL7sF3vN6hR4cY1nW5bT8xM9pB2gF5kZQ",
   },
   {
     address: "0xf6e5d4c3b2a1",
@@ -71,6 +75,8 @@ export const tokens: TokenRow[] = [
     updatedAt: new Date(Date.now() - 5 * 60000).toISOString(),
     signals: ["DEXAD_PAID", "CTO", "UPDATE_SOCIAL"],
     launchpad: "bags", // Added launchpad property
+    mint: "9yHXtLg5vR3pQ4sM8jK7hB2cY6nW9cT4vL2xR5qD8fE1",
+    creator: "ALICEp2K8mN6qR9sL3jD7hF5cX1nY4bV9xQ2mB8gT6kZ",
   },
   {
     address: "0x1a2b3c4d5e6f",
@@ -87,6 +93,8 @@ export const tokens: TokenRow[] = [
     signals: ["DEXBOOST_PAID", "DEXAD_PAID", "ATH", "PRICE_UP"],
     boostCount: 50,
     launchpad: "heaven", // Added launchpad property
+    mint: "4kZQrLm8vN7mT9sL3jD6hK5cX2nY8bV7vQ4xM9pB2gF5",
+    creator: "BOBKYm5K9pL7sF2jW6hR8cX4nZ1bV5xT9qM3gD8kE7pump",
   },
   {
     address: "0x9f8e7d6c5b4a",
@@ -102,6 +110,7 @@ export const tokens: TokenRow[] = [
     updatedAt: new Date(Date.now() - 8 * 60000).toISOString(),
     signals: ["PRICE_UP", "KEY_MC"],
     launchpad: "bags", // Added launchpad property
+    creator: "WOJAKp8K2nL5qR9sM7jD4hF2cX9nY6bV3xT8pB5gK1fZ",
   },
   {
     address: "0x3c2b1a9f8e7d",
@@ -117,6 +126,7 @@ export const tokens: TokenRow[] = [
     updatedAt: new Date(Date.now() - 3 * 60000).toISOString(),
     signals: ["DEXBAR_PAID", "CTO", "PRICE_UP"],
     launchpad: "pumpfun", // Added launchpad property
+    creator: "FLOKIr5K3nM8qL2sP6jW9hB4cY7nX2bV9xT5pK8gF3kZ",
   },
   {
     address: "0x7d6c5b4a3f2e",
@@ -132,6 +142,7 @@ export const tokens: TokenRow[] = [
     updatedAt: new Date(Date.now() - 12 * 60000).toISOString(),
     signals: ["UPDATE_SOCIAL"],
     launchpad: "bags", // Added launchpad property
+    creator: "SKINGm4K7nP2qR6sL9jF5hC8cY3nB6vX1xM7pD9gT4fE",
   },
   {
     address: "0x4e3f2a1b9c8d",
@@ -148,6 +159,7 @@ export const tokens: TokenRow[] = [
     signals: ["DEXBOOST_PAID", "ATH", "PRICE_UP", "KEY_MC"],
     boostCount: 100,
     launchpad: "heaven", // Added launchpad property
+    creator: "MRKTLp3K8nQ5sR7jM2hF9cX6nY4bV1xT8pG5kD9fE2pump",
   },
   {
     address: "0x8d7c6b5a4e3f",
@@ -163,6 +175,7 @@ export const tokens: TokenRow[] = [
     updatedAt: new Date(Date.now() - 6 * 60000).toISOString(),
     signals: ["DEXAD_PAID", "PRICE_UP"],
     launchpad: "bags", // Added launchpad property
+    creator: "DKILLq7K2nM9pR4sL8jD3hF5cY6nX8bV2xT9pB4gK7fZ",
   },
   {
     address: "0x2e1f9a8b7c6d",
@@ -179,6 +192,7 @@ export const tokens: TokenRow[] = [
     signals: ["DEXBOOST_PAID", "DEXBAR_PAID", "ATH"],
     boostCount: 10,
     launchpad: "pumpfun", // Added launchpad property
+    creator: "PUMPXm8K5nL3qR7sM4jW2hF9cY6nB1vT8xP5gK9fD2pump",
   },
   {
     address: "0x5a4e3f2b1c9d",
@@ -194,6 +208,7 @@ export const tokens: TokenRow[] = [
     updatedAt: new Date(Date.now() - 15 * 60000).toISOString(),
     signals: ["CTO", "UPDATE_SOCIAL"],
     launchpad: "bags", // Added launchpad property
+    creator: "GCHADp6K9nQ3sR5jL8hF2cY4nX7bV1xT2pM8gD5kE9fZ",
   },
   {
     address: "0x9c8d7e6f5a4b",
@@ -209,6 +224,7 @@ export const tokens: TokenRow[] = [
     updatedAt: new Date(Date.now() - 4 * 60000).toISOString(),
     signals: ["DEXAD_PAID", "PRICE_UP", "KEY_MC"],
     launchpad: "heaven", // Added launchpad property
+    creator: "APEXKm2K7nP4qR8sL5jF1hC3cY9nB6vX7xM4pD2gT8fE",
   },
   {
     address: "0x6f5e4d3c2b1a",
@@ -224,6 +240,7 @@ export const tokens: TokenRow[] = [
     updatedAt: new Date(Date.now() - 10 * 60000).toISOString(),
     signals: ["CTO"],
     launchpad: "bags", // Added launchpad property
+    creator: "DMNDSr8K3nL6qP2sM9jW4hF7cY1nX5bV8xT3pG6kD2fE",
   },
   {
     address: "0x3b2a1f9e8d7c",
@@ -239,6 +256,7 @@ export const tokens: TokenRow[] = [
     updatedAt: new Date(Date.now() - 7 * 60000).toISOString(),
     signals: ["DEXBAR_PAID", "PRICE_UP"],
     launchpad: "pumpfun", // Added launchpad property
+    creator: "HODLXm9K4nP7qR1sL6jF3hC5cY8nB2vT9xM1pG7kD4fE",
   },
   {
     address: "0x7e6d5c4b3a2f",
@@ -255,6 +273,7 @@ export const tokens: TokenRow[] = [
     signals: ["DEXBOOST_PAID", "DEXAD_PAID", "ATH", "KEY_MC"],
     boostCount: 500,
     launchpad: "heaven", // Added launchpad property
+    creator: "BULLRm7K1nQ4sP8jL3hF9cY2nX5bV6xT4pM9gK2fD7pump",
   },
   {
     address: "0x1f2e3d4c5b6a",
@@ -270,6 +289,7 @@ export const tokens: TokenRow[] = [
     updatedAt: new Date(Date.now() - 18 * 60000).toISOString(),
     signals: ["UPDATE_SOCIAL"],
     launchpad: "bags", // Added launchpad property
+    creator: "MLORDq3K8nL2pR6sM5jF7hC1cY4nX9bV2xT6pG3kD8fE",
   },
   {
     address: "0x8a7b6c5d4e3f",
@@ -286,6 +306,7 @@ export const tokens: TokenRow[] = [
     signals: ["DEXBOOST_PAID", "PRICE_UP", "ATH"],
     boostCount: 30,
     launchpad: "pumpfun", // Added launchpad property
+    creator: "RMOONp5K3nM7qL9sR2jF6hC4cY8nB1vT5xP2gD9kE6pump",
   },
   {
     address: "0x4d3c2b1a9f8e",
@@ -301,6 +322,7 @@ export const tokens: TokenRow[] = [
     updatedAt: new Date(Date.now() - 20 * 60000).toISOString(),
     signals: ["CTO"],
     launchpad: "bags", // Added launchpad property
+    creator: "SRUGKm6K1nQ8pR4sL7jF2hC9cY3nX6bV8xT1pM4gD7fE",
   },
   {
     address: "0x9e8f7d6c5b4a",
@@ -316,6 +338,7 @@ export const tokens: TokenRow[] = [
     updatedAt: new Date(Date.now() - 5.5 * 60000).toISOString(),
     signals: ["DEXAD_PAID", "PRICE_UP", "KEY_MC"],
     launchpad: "heaven", // Added launchpad property
+    creator: "WHALEq8K5nL1pR3sM7jF4hC2cY9nX6bV1xT5pG8kD3pump",
   },
 ]
 

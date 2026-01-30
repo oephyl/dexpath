@@ -1,11 +1,10 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { Geist, Geist_Mono } from "next/font/google"
-import { Analytics } from "@vercel/analytics/next"
-import "./globals.css"
 
-const _geist = Geist({ subsets: ["latin"] })
-const _geistMono = Geist_Mono({ subsets: ["latin"] })
+import { Analytics } from "@vercel/analytics/next"
+import { Toaster } from "@/components/ui/toaster"
+import "../styles/font-override.css"
+import "./globals.css"
 
 export const metadata: Metadata = {
   title: "Dexpath - Paid Signals Terminal",
@@ -66,6 +65,7 @@ export default function RootLayout({
         </div>
 
         <div className="relative z-10">{children}</div>
+        <Toaster />
         <Analytics />
       </body>
     </html>

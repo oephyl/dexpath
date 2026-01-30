@@ -12,6 +12,7 @@ import Image from "next/image"
 import { Copy, Target, Rocket, Construction, CheckCircle2, Heart, Repeat2, MessageCircle, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { useToast } from "@/hooks/use-toast"
 import {
   Dialog,
   DialogContent,
@@ -31,32 +32,7 @@ interface TokenTableProps {
   newestTokenAddress?: string | null
   searchQuery?: string
   onTokenClick?: (token: TokenRow) => void
-}
-
-interface KOLCall {
-  id: string
-  kolName: string
-  kolHandle: string
-  kolAvatar: string
-  kolFollowers: number
-  kolVerified: boolean
-  token: {
-    address: string
-    name: string
-    symbol: string
-    logo: string
-    price: number
-    change5m: number
-    mc: number
-  }
-  postContent: string
-  postUrl: string
-  postTime: string
-  engagement: {
-    likes: number
-    retweets: number
-    replies: number
-  }
+  isLoading?: boolean
 }
 
 interface PrelaunchProject {
@@ -69,87 +45,6 @@ interface PrelaunchProject {
   description: string
   launchDate: string
 }
-
-const mockKOLCalls: KOLCall[] = [
-  {
-    id: "kol_001",
-    kolName: "Crypto Alpha",
-    kolHandle: "@cryptoalpha",
-    kolAvatar: "/placeholder.svg?height=48&width=48",
-    kolFollowers: 125000,
-    kolVerified: true,
-    token: {
-      address: "0xa1b2c3d4e5f6",
-      name: "PepeMax",
-      symbol: "PMAX",
-      logo: "/pepe-frog-crypto-logo.jpg",
-      price: 0.00042,
-      change5m: 24.5,
-      mc: 850000,
-    },
-    postContent:
-      "🚀 Just discovered $PMAX - strong fundamentals and growing community. This could be the next 100x gem! DYOR but I'm bullish AF. #Solana #DeFi",
-    postUrl: "https://twitter.com/cryptoalpha/status/123456",
-    postTime: new Date(Date.now() - 15 * 60000).toISOString(),
-    engagement: {
-      likes: 523,
-      retweets: 187,
-      replies: 94,
-    },
-  },
-  {
-    id: "kol_002",
-    kolName: "SOL Whale",
-    kolHandle: "@solwhale",
-    kolAvatar: "/placeholder.svg?height=48&width=48",
-    kolFollowers: 89000,
-    kolVerified: true,
-    token: {
-      address: "0x1a2b3c4d5e6f",
-      name: "ElonDoge",
-      symbol: "EDOGE",
-      logo: "/doge-rocket-crypto-logo.jpg",
-      price: 0.0089,
-      change5m: 145.8,
-      mc: 5600000,
-    },
-    postContent:
-      "$EDOGE is absolutely mooning right now! +145% in 5 minutes. Team just delivered on roadmap. This is NOT financial advice but... 🌙",
-    postUrl: "https://twitter.com/solwhale/status/123457",
-    postTime: new Date(Date.now() - 5 * 60000).toISOString(),
-    engagement: {
-      likes: 892,
-      retweets: 341,
-      replies: 156,
-    },
-  },
-  {
-    id: "kol_003",
-    kolName: "DeFi Hunter",
-    kolHandle: "@defihunter",
-    kolAvatar: "/placeholder.svg?height=48&width=48",
-    kolFollowers: 210000,
-    kolVerified: true,
-    token: {
-      address: "0x7e6d5c4b3a2f",
-      name: "BullRun",
-      symbol: "BULL",
-      logo: "/bull-charge-crypto-logo.jpg",
-      price: 0.0892,
-      change5m: 167.4,
-      mc: 8200000,
-    },
-    postContent:
-      "Thread 🧵 on why $BULL is my top pick for this cycle:\n\n1. Strong dev team\n2. Innovative tokenomics\n3. Growing ecosystem\n4. Early entry opportunity\n\nNFA, DYOR. LFG! 🔥",
-    postUrl: "https://twitter.com/defihunter/status/123458",
-    postTime: new Date(Date.now() - 25 * 60000).toISOString(),
-    engagement: {
-      likes: 1247,
-      retweets: 498,
-      replies: 203,
-    },
-  },
-]
 
 const mockPrelaunchProjects: PrelaunchProject[] = [
   {
@@ -184,8 +79,9 @@ const mockPrelaunchProjects: PrelaunchProject[] = [
   },
 ]
 
-export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQuery, onTokenClick }: TokenTableProps) {
+export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQuery, onTokenClick, isLoading }: TokenTableProps) {
   const router = useRouter()
+  const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<string>("new")
   const [launchpadFilter, setLaunchpadFilter] = useState<string>("pumpfun")
   const [boostFilter, setBoostFilter] = useState<string>("all")
@@ -307,6 +203,16 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     return `${Math.floor(hours / 24)}d ago`
   }
 
+  const formatCreator = (creator: string) => {
+    if (!creator || creator.length <= 10) return creator
+    return `${creator.slice(0, 5)}...${creator.slice(-5)}`
+  }
+
+  const formatMint = (mint: string) => {
+    if (!mint || mint.length <= 8) return mint
+    return `${mint.slice(0, 3)}...${mint.slice(-5)}`
+  }
+
   const openBuyLink = (platform: string, address: string, e: React.MouseEvent) => {
     e.stopPropagation()
     const links: Record<string, string> = {
@@ -319,7 +225,21 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   }
 
   const handleTokenClick = (token: TokenRow) => {
+    console.log("[v0] Token clicked:", {
+      address: token.address,
+      mint: token.mint,
+      creator: token.creator,
+      name: token.name,
+      symbol: token.symbol,
+      fullData: token
+    })
+    
+    // Store with both address and mint as keys to handle both cases
     localStorage.setItem(`token_${token.address}`, JSON.stringify(token))
+    if (token.mint && token.mint !== token.address) {
+      localStorage.setItem(`token_${token.mint}`, JSON.stringify(token))
+    }
+    
     if (onTokenClick) {
       onTokenClick(token)
     } else {
@@ -369,7 +289,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   return (
     <Card>
       <CardHeader className="pb-px">
-        {/* Reordered tabs: New Coins, New Dexpaid, New Boost, CTO, New Ads, Signals, KOL, Prelaunch */}
+        {/* Reordered tabs: New Coins, New Dexpaid, New Boost, CTO, New Ads, Signals, Prelaunch */}
         <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-1.5 sm:gap-2">
           <Button
             variant={activeTab === "new" ? "default" : "outline"}
@@ -420,14 +340,6 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
             Signals
           </Button>
           <Button
-            variant={activeTab === "kol" ? "default" : "outline"}
-            size="sm"
-            className="text-[10px] sm:text-xs py-1 h-7 sm:h-8"
-            onClick={() => setActiveTab("kol")}
-          >
-            KOL
-          </Button>
-          <Button
             variant={activeTab === "prelaunch" ? "default" : "outline"}
             size="sm"
             className="text-[10px] sm:text-xs py-1 h-7 sm:h-8 flex items-center gap-1"
@@ -462,35 +374,46 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                 ))}
               </div>
             )}
-            <Button
-              size="sm"
-              className="bg-primary hover:bg-primary/90 text-black font-semibold text-xs h-8"
-              onClick={() => {
-                const tabNames: Record<string, string> = {
-                  new: "New Coins",
-                  dexpaid: "New Dexpaid",
-                  boost: "New Boost",
-                  cto: "CTO",
-                  ads: "New Ads",
-                  signals: "Signals",
-                }
-                alert(`Snipe ${tabNames[activeTab]} - Feature coming soon!`)
-              }}
-            >
-              <Target className="h-3 w-3 mr-1" />
-              Snipe{" "}
-              {activeTab === "new"
-                ? "New Coins"
-                : activeTab === "dexpaid"
-                  ? "New Dexpaid"
-                  : activeTab === "boost"
-                    ? "New Boost"
-                    : activeTab === "cto"
-                      ? "CTO"
-                      : activeTab === "ads"
-                        ? "New Ads"
-                        : "Signals"}
-            </Button>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button
+                    size="sm"
+                    className="bg-primary hover:bg-primary/90 text-black font-semibold text-xs h-8"
+                  >
+                    <Target className="h-3 w-3 mr-1" />
+                    Snipe{" "}
+                    {activeTab === "new"
+                      ? "New Coins"
+                      : activeTab === "dexpaid"
+                        ? "New Dexpaid"
+                        : activeTab === "boost"
+                          ? "New Boost"
+                          : activeTab === "cto"
+                            ? "CTO"
+                            : activeTab === "ads"
+                              ? "New Ads"
+                              : "Signals"}
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Coming Soon</DialogTitle>
+                    <DialogDescription>
+                      Snipe {(() => {
+                        const tabNames: Record<string, string> = {
+                          new: "New Coins",
+                          dexpaid: "New Dexpaid",
+                          boost: "New Boost",
+                          cto: "CTO",
+                          ads: "New Ads",
+                          signals: "Signals",
+                        };
+                        return tabNames[activeTab] || "Feature";
+                      })()} - Feature coming soon!
+                    </DialogDescription>
+                  </DialogHeader>
+                </DialogContent>
+              </Dialog>
           </div>
         )}
 
@@ -546,94 +469,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
         {activeTab === "boost" && <></>}
       </CardHeader>
       <CardContent className="p-0">
-        {activeTab === "kol" ? (
-          <div className="overflow-y-auto h-[600px] px-3 space-y-2 py-3">
-            {mockKOLCalls.map((call) => (
-              <div
-                key={call.id}
-                className="p-3 rounded-lg bg-secondary/30 hover:bg-secondary/50 border border-border transition-colors"
-              >
-                {/* Influencer & Token Header */}
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Image
-                      src={call.kolAvatar || "/placeholder.svg"}
-                      alt={call.kolName}
-                      width={32}
-                      height={32}
-                      className="rounded-full"
-                    />
-                    <div>
-                      <div className="flex items-center gap-1">
-                        <span className="font-semibold text-xs sm:text-sm">{call.kolName}</span>
-                        {call.kolVerified && <CheckCircle2 className="h-3 w-3 text-primary" />}
-                      </div>
-                      <p className="text-[10px] sm:text-sm text-muted-foreground">
-                        {call.kolHandle} · {formatNumber(call.kolFollowers)} followers
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Image
-                      src={call.token.logo || "/placeholder.svg"}
-                      alt={call.token.symbol}
-                      width={24}
-                      height={24}
-                      className="rounded-full"
-                    />
-                    <span className="font-semibold text-xs sm:text-sm">${call.token.symbol}</span>
-                  </div>
-                </div>
-
-                {/* Post Content */}
-                <p className="text-xs sm:text-sm text-foreground/90 mb-2 line-clamp-2">{call.postContent}</p>
-
-                {/* Token Info & Engagement */}
-                <div className="flex items-center justify-between text-[10px] sm:text-sm text-muted-foreground">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono">${formatPrice(call.token.price)}</span>
-                    <span className={`font-semibold ${call.token.change5m >= 0 ? "text-green-500" : "text-red-500"}`}>
-                      {call.token.change5m >= 0 ? "+" : ""}
-                      {call.token.change5m.toFixed(1)}%
-                    </span>
-                    <span>MC: {formatMarketCap(call.token.mc)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="flex items-center gap-0.5">
-                      <Heart className="h-3 w-3" /> {formatNumber(call.engagement.likes)}
-                    </span>
-                    <span className="flex items-center gap-0.5">
-                      <Repeat2 className="h-3 w-3" /> {formatNumber(call.engagement.retweets)}
-                    </span>
-                    <span className="flex items-center gap-0.5">
-                      <MessageCircle className="h-3 w-3" /> {formatNumber(call.engagement.replies)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-2 mt-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="flex-1 h-7 text-[10px] sm:text-sm bg-transparent"
-                    onClick={() => window.open(call.postUrl, "_blank")}
-                  >
-                    View Post
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="default"
-                    className="flex-1 h-7 text-[10px] sm:text-sm"
-                    onClick={() => (window.location.href = `/token/${call.token.address}`)}
-                  >
-                    Token Details
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : activeTab === "prelaunch" ? (
+        {activeTab === "prelaunch" ? (
           <>
             <div className="flex justify-end px-4 py-2 border-b border-border">
               <Dialog open={showPrelaunchForm} onOpenChange={setShowPrelaunchForm}>
@@ -920,93 +756,195 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
               </div>
             ) : (
               <>
-                <Table wrapperClassName="h-[600px] overflow-auto overflow-x-auto" className="w-full min-w-[960px]">
-                  <TableHeader className="shadow-sm">
-                      <TableRow className="hover:bg-transparent border-border">
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background pl-4 pr-3 py-3 text-left min-w-[200px]">
+                <Table wrapperClassName="h-[600px] overflow-auto overflow-x-auto" className="w-full min-w-[980px]">
+                  <TableHeader className="sticky top-0 shadow-md z-10">
+                      <TableRow className="hover:bg-transparent border-border bg-background/95 backdrop-blur-sm">
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 pl-3 pr-2 py-2 text-left min-w-[200px]">
                           Token
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 py-3 text-right min-w-[88px]">
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 px-2 py-2 text-left min-w-[120px]">
+                          Creator
+                        </TableHead>
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 px-2 py-2 text-left min-w-[120px]">
+                          Mint
+                        </TableHead>
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 px-2 py-2 text-right min-w-[80px]">
                           MC
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 py-3 text-right min-w-[80px]">
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 px-2 py-2 text-right min-w-[70px]">
                           Price
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 py-3 text-right min-w-[56px]">
-                          5m
-                        </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 py-3 text-right min-w-[88px]">
-                          Vol(24h)
-                        </TableHead>
                         {activeTab !== "new" && (
-                          <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 py-3 text-left min-w-[100px]">
+                          <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 px-2 py-2 text-left min-w-[90px]">
                             Signals
                           </TableHead>
                         )}
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 py-3 text-right min-w-[72px]">
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 px-2 py-2 text-right min-w-[60px]">
                           Updated
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background pl-3 pr-4 py-3 text-center min-w-[112px]">
+                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 pl-2 pr-3 py-2 text-center min-w-[100px]">
                           Buy
                         </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredTokens.map((token) => (
+                      {isLoading ? (
+                        // Loading skeleton rows
+                        Array.from({ length: 5 }).map((_, index) => (
+                          <TableRow key={`loading-${index}`} className="border-border">
+                            <TableCell className="py-3 pl-4 pr-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 bg-secondary rounded-full animate-pulse"></div>
+                                <div className="space-y-1">
+                                  <div className="h-3 bg-secondary rounded animate-pulse w-16"></div>
+                                  <div className="h-2 bg-secondary rounded animate-pulse w-12"></div>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-3 px-3">
+                              <div className="h-3 bg-secondary rounded animate-pulse w-20"></div>
+                            </TableCell>
+                            <TableCell className="py-3 px-3">
+                              <div className="h-3 bg-secondary rounded animate-pulse w-16"></div>
+                            </TableCell>
+                            <TableCell className="py-3 px-3">
+                              <div className="h-3 bg-secondary rounded animate-pulse w-12"></div>
+                            </TableCell>
+                            <TableCell className="py-3 px-3">
+                              <div className="h-3 bg-secondary rounded animate-pulse w-14"></div>
+                            </TableCell>
+                            <TableCell className="py-3 px-3">
+                              <div className="h-3 bg-secondary rounded animate-pulse w-16"></div>
+                            </TableCell>
+                            <TableCell className="py-3 pl-3 pr-4">
+                              <div className="h-6 bg-secondary rounded animate-pulse w-12"></div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        filteredTokens.map((token) => (
                         <TableRow
                           key={token.address}
                           onClick={() => handleTokenClick(token)}
                           className={`cursor-pointer hover:bg-secondary/50 transition-colors border-border ${
-                            newestTokenAddress === token.address ? "animate-slide-in" : ""
+                            !isLoading && newestTokenAddress === token.address ? "animate-slide-in" : ""
                           }`}
                         >
-                          <TableCell className="py-3 pl-4 pr-3 text-left align-middle">
-                            <div className="flex items-center gap-2 min-w-0">
+                          <TableCell className="py-2.5 pl-3 pr-2 text-left align-middle">
+                            <div className="flex items-center gap-3 min-w-0">
                               <Image
                                 src={token.logo || "/placeholder.svg"}
                                 alt={token.symbol}
-                                width={28}
-                                height={28}
-                                className="rounded-full object-cover shrink-0"
+                                width={36}
+                                height={36}
+                                className="rounded-full object-cover shrink-0 w-8 h-8 sm:w-9 sm:h-9"
                               />
-                              <div className="flex flex-col min-w-0">
-                                <span className="font-semibold text-foreground text-[10px] sm:text-xs truncate">
+                              <div className="flex flex-col min-w-0 flex-1">
+                                <span className="font-medium text-foreground text-[9px] sm:text-[10px] truncate leading-tight">
                                   {token.name}
                                 </span>
-                                <div className="flex items-center gap-1">
-                                  <span className="text-[9px] sm:text-xs text-muted-foreground truncate">{token.symbol}</span>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className="text-[8px] sm:text-[9px] text-muted-foreground truncate font-mono">{token.symbol}</span>
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    className="size-6 shrink-0 p-0 hover:bg-primary/20"
-                                    onClick={(e) => {
+                                    className="h-4 w-4 shrink-0 p-0 hover:bg-secondary/80 rounded-md"
+                                    onClick={async (e) => {
                                       e.stopPropagation()
-                                      navigator.clipboard.writeText(token.address)
+                                      try {
+                                        await navigator.clipboard.writeText(token.address)
+                                        toast({
+                                          description: "Contract address copied!",
+                                          duration: 2000
+                                        })
+                                      } catch (err) {
+                                        console.error('Failed to copy contract address:', err)
+                                        toast({
+                                          description: "Failed to copy address",
+                                          variant: "destructive",
+                                          duration: 2000
+                                        })
+                                      }
                                     }}
                                     title="Copy Contract Address"
                                   >
-                                    <Copy className="size-2.5 text-muted-foreground" />
+                                    <Copy className="w-2 h-2 text-muted-foreground" />
                                   </Button>
                                 </div>
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="py-3 px-4 text-right font-mono text-[10px] sm:text-xs align-middle whitespace-nowrap">
-                            {formatMarketCap(token.mc)}
+                          <TableCell className="py-3 px-4 text-left align-middle">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <code className="bg-secondary/60 px-1 py-0.5 rounded text-[7px] sm:text-[8px] font-mono text-foreground border border-border/50">
+                                {formatCreator(token.creator || token.address)}
+                              </code>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-4 w-4 p-0 hover:bg-secondary/80 rounded-md shrink-0"
+                                onClick={async (e) => {
+                                  e.stopPropagation()
+                                  try {
+                                    const textToCopy = token.creator || token.address
+                                    await navigator.clipboard.writeText(textToCopy)
+                                    toast({
+                                      description: "Creator address copied!",
+                                      duration: 2000
+                                    })
+                                  } catch (err) {
+                                    console.error('Failed to copy creator address:', err)
+                                    toast({
+                                      description: "Failed to copy creator address",
+                                      variant: "destructive",
+                                      duration: 2000
+                                    })
+                                  }
+                                }}
+                                title="Copy Creator Address"
+                              >
+                                <Copy className="w-2 h-2 text-muted-foreground" />
+                              </Button>
+                            </div>
                           </TableCell>
-                          <TableCell className="py-3 px-4 text-right font-mono text-[10px] sm:text-xs align-middle whitespace-nowrap">
-                            {formatPrice(token.price)}
+                          <TableCell className="py-3 px-4 text-left align-middle">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <code className="bg-secondary/60 px-1 py-0.5 rounded text-[7px] sm:text-[8px] font-mono text-foreground border border-border/50">
+                                {formatMint(token.mint || token.address)}
+                              </code>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-4 w-4 p-0 hover:bg-secondary/80 rounded-md shrink-0"
+                                onClick={async (e) => {
+                                  e.stopPropagation()
+                                  try {
+                                    const textToCopy = token.mint || token.address
+                                    await navigator.clipboard.writeText(textToCopy)
+                                    toast({
+                                      description: "Mint address copied!",
+                                      duration: 2000
+                                    })
+                                  } catch (err) {
+                                    console.error('Failed to copy mint address:', err)
+                                    toast({
+                                      description: "Failed to copy mint address",
+                                      variant: "destructive",
+                                      duration: 2000
+                                    })
+                                  }
+                                }}
+                                title="Copy Mint Address"
+                              >
+                                <Copy className="w-2 h-2 text-muted-foreground" />
+                              </Button>
+                            </div>
                           </TableCell>
-                          <TableCell className="py-3 px-4 text-right align-middle whitespace-nowrap">
-                            <span
-                              className={`font-semibold text-[10px] sm:text-xs ${token.change5m >= 0 ? "text-green-500" : "text-red-500"}`}
-                            >
-                              {token.change5m >= 0 ? "+" : ""}
-                              {token.change5m.toFixed(1)}%
-                            </span>
+                          <TableCell className="py-2 px-2 text-right font-mono text-[9px] sm:text-[10px] align-middle whitespace-nowrap font-medium">
+                            <span className="text-foreground">{formatMarketCap(token.mc)}</span>
                           </TableCell>
-                          <TableCell className="py-3 px-4 text-right font-mono text-[10px] sm:text-xs align-middle whitespace-nowrap">
-                            {formatNumber(token.volume24h)}
+                          <TableCell className="py-2 px-2 text-right font-mono text-[9px] sm:text-[10px] align-middle whitespace-nowrap font-medium">
+                            <span className="text-foreground">${formatPrice(token.price)}</span>
                           </TableCell>
                           {activeTab !== "new" && (
                             <TableCell className="py-3 px-4 text-left align-middle">
@@ -1028,15 +966,15 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                               </div>
                             </TableCell>
                           )}
-                          <TableCell className="py-3 px-4 text-right text-[9px] sm:text-xs text-muted-foreground align-middle whitespace-nowrap">
-                            {getTimeAgo(token.updatedAt)}
+                          <TableCell className="py-2 px-2 text-right text-[8px] sm:text-[9px] text-muted-foreground align-middle whitespace-nowrap">
+                            <span className="font-medium">{getTimeAgo(token.updatedAt)}</span>
                           </TableCell>
-                          <TableCell className="py-3 pl-3 pr-4 text-center align-middle">
-                            <div className="flex gap-1 justify-center">
+                          <TableCell className="py-2 pl-2 pr-3 text-center align-middle">
+                            <div className="flex gap-1.5 justify-center items-center">
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                className="h-6 w-6 p-0 hover:bg-primary/20"
+                                className="h-7 w-7 p-0 hover:bg-primary/20 rounded-md"
                                 onClick={(e) => openBuyLink("trojan", token.address, e)}
                                 title="Buy on Trojan"
                               >
@@ -1078,7 +1016,8 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                             </div>
                           </TableCell>
                         </TableRow>
-                      ))}
+                        ))
+                      )}
                     </TableBody>
                   </Table>
               </>

@@ -63,6 +63,8 @@ export function mapPumpFunTokenToTokenRow(pumpToken: PumpFunToken): TokenRow {
     signals,
     boostCount: undefined,
     launchpad: "pumpfun",
+    mint: pumpToken.mint, // Add mint field
+    creator: pumpToken.creator, // Add creator field
   }
 }
 
@@ -78,48 +80,43 @@ export async function fetchPumpFunTokens(): Promise<TokenRow[]> {
     }
 
     const data = await response.json()
-    console.log("[v0] API response data:", data)
+    console.log("[v0] API response data:", JSON.stringify(data, null, 2))
 
     // Handle different response formats
     let pumpTokens: PumpFunToken[] = []
 
     if (Array.isArray(data)) {
       pumpTokens = data
+      console.log("[v0] Using data as array, length:", pumpTokens.length)
     } else if (data.data && Array.isArray(data.data)) {
       pumpTokens = data.data
+      console.log("[v0] Using data.data as array, length:", pumpTokens.length)
     } else if (data.tokens && Array.isArray(data.tokens)) {
       pumpTokens = data.tokens
+      console.log("[v0] Using data.tokens as array, length:", pumpTokens.length)
     } else {
       console.error("[v0] Unexpected API response format:", data)
+      console.log("[v0] Data keys:", Object.keys(data))
       return []
     }
 
-    console.log("[v0] Mapped tokens count:", pumpTokens.length)
+    console.log("[v0] Processing tokens count:", pumpTokens.length)
 
-    const mappedTokens = pumpTokens.slice(0, 20).map(mapPumpFunTokenToTokenRow)
-
-    // Enrich with DexScreener for real 5m, vol, liquidity when token has a pair
-    for (let i = 0; i < mappedTokens.length; i++) {
-      const row = mappedTokens[i]
-      try {
-        const enriched = await enrichTokenFromDexScreener(row.address, "solana")
-        if (enriched) {
-          mappedTokens[i] = {
-            ...row,
-            price: Number.parseFloat(enriched.priceUsd || "0") || row.price,
-            mc: enriched.marketCap ?? row.mc,
-            change5m: enriched.priceChange5m ?? 0,
-            change1h: enriched.priceChange1h ?? 0,
-            volume24h: enriched.volume24h ?? 0,
-            liquidity: enriched.liquidity ?? row.liquidity,
-          }
-        }
-      } catch {
-        // keep pump.fun data if enrichment fails
+    // Remove duplicates - STRICTLY by mint address only
+    const seenMints = new Set()
+    const uniquePumpTokens = pumpTokens.filter(token => {
+      if (seenMints.has(token.mint)) {
+        return false  // Skip if mint already seen
       }
-    }
+      seenMints.add(token.mint)
+      return true
+    })
+    
+    console.log("[v0] After removing mint duplicates:", uniquePumpTokens.length)
 
-    console.log("[v0] Returning tokens:", mappedTokens.length)
+    const mappedTokens = uniquePumpTokens.slice(0, 20).map(mapPumpFunTokenToTokenRow)
+
+    console.log("[v0] Final unique tokens:", mappedTokens.length)
     return mappedTokens
   } catch (error) {
     console.error("[v0] Error fetching pump.fun tokens:", error)
@@ -210,6 +207,8 @@ export function mapCTOTokenToTokenRow(ctoToken: CTOToken): TokenRow {
     signals: signals,
     boostCount: undefined,
     launchpad: undefined,
+    mint: ctoToken.tokenAddress || "unknown", // Add mint field
+    creator: undefined, // CTO tokens don't have creator info
   }
 }
 
@@ -283,6 +282,8 @@ export function mapDexPaidAdToTokenRow(ad: DexScreenerAd, enriched: Awaited<Retu
     signals,
     boostCount: undefined,
     launchpad: undefined,
+    mint: address, // Add mint field
+    creator: undefined, // DexPaid ads don't have creator info
   }
 }
 
@@ -305,27 +306,27 @@ export function mapBoostToTokenRow(boost: DexScreenerBoost, enriched: Awaited<Re
     signals,
     boostCount: typeof amount === "number" && amount > 0 ? amount : undefined,
     launchpad: undefined,
+    mint: address, // Add mint field
+    creator: undefined, // Boost tokens don't have creator info
   }
 }
 
 export async function fetchDexPaidTokens(): Promise<TokenRow[]> {
   try {
-    const response = await fetch("/api/ads")
-    if (!response.ok) return []
-    const data = await response.json()
-    const ads: DexScreenerAd[] = Array.isArray(data) ? data : []
-    const chainId = "solana"
-    const results: TokenRow[] = []
+    const response = await fetch("/api/ads");
+    if (!response.ok) return [];
+    const data = await response.json();
+    const ads: DexScreenerAd[] = Array.isArray(data) ? data : data?.ads ?? data?.data ?? [];
+    const mappedTokens: TokenRow[] = [];
     for (const ad of ads.slice(0, 20)) {
-      const addr = ad.tokenAddress
-      if (!addr) continue
-      const enriched = await enrichTokenFromDexScreener(addr, chainId)
-      results.push(mapDexPaidAdToTokenRow(ad, enriched))
+      const address = ad.tokenAddress || "unknown";
+      const enriched = await enrichTokenFromDexScreener(address, ad.chainId || "solana");
+      mappedTokens.push(mapDexPaidAdToTokenRow(ad, enriched));
     }
-    return results
+    return mappedTokens;
   } catch (error) {
-    console.error("[v0] Error fetching DexPaid tokens:", error)
-    return []
+    console.error("[v0] Error fetching DexPaid tokens:", error);
+    return [];
   }
 }
 

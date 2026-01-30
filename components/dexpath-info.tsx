@@ -16,7 +16,7 @@ export function DexpathInfo() {
     holders: 1247,
   })
 
-  const contractAddress = "DexPathxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxpump"
+  const contractAddress = "xxxxxxxxxxxxxxxxxxxxxxpump"
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -44,7 +44,7 @@ export function DexpathInfo() {
   ]
 
   return (
-    <Card className="h-fit bg-secondary/30 border-border/50 shadow-sm">
+    <Card className="h-fit bg-secondary/30 border-border/50 shadow-sm font-sans">
       <CardContent className="px-5 sm:px-6 py-4 sm:py-4 flex flex-col gap-4">
         {/* Header: logo + token name */}
         <div className="flex items-center gap-3">

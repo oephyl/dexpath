@@ -15,7 +15,7 @@ import { CreateAdDialog } from "@/components/create-ad-dialog"
 export default function Home() {
   const [tokens, setTokens] = useState<TokenRow[]>([])
   const [searchQuery, setSearchQuery] = useState("")
-  const seenTokensRef = useRef<Set<string>>(new Set())
+  const [isLoading, setIsLoading] = useState(true)
 
   const handleSearchFocus = async () => {
     try {
@@ -29,15 +29,45 @@ export default function Home() {
   }
 
   useEffect(() => {
-    const fetchTokens = async () => {
-      const newTokens = await fetchPumpFunTokens()
-      const seenTokens = seenTokensRef.current
-      const updatedTokens = newTokens.filter((token) => !seenTokens.has(token.address))
-      setTokens((prevTokens) => [...prevTokens, ...updatedTokens])
-      updatedTokens.forEach((token) => seenTokens.add(token.address))
+    const fetchTokens = async (isInitial = false) => {
+      try {
+        if (isInitial) setIsLoading(true)
+        
+        const newTokens = await fetchPumpFunTokens()
+        
+        // STRICT deduplication by mint address ONLY
+        const seenMints = new Set()
+        const uniqueTokens = newTokens.filter(token => {
+          const mint = token.mint || token.address
+          if (seenMints.has(mint)) {
+            return false  // Skip completely if mint already seen
+          }
+          seenMints.add(mint)
+          return true
+        })
+        
+        console.log("[Frontend] Received tokens:", newTokens.length, "Unique by mint:", uniqueTokens.length)
+        
+        // Replace the entire token list with the latest unique data
+        setTokens(uniqueTokens)
+        
+        if (isInitial) setIsLoading(false)
+      } catch (error) {
+        console.error("[Frontend] Error fetching tokens:", error)
+        if (isInitial) setIsLoading(false)
+      }
     }
 
-    fetchTokens()
+    // Fetch initially with loading state
+    fetchTokens(true)
+
+    // Set up interval to fetch every 5 seconds (without loading state)
+    const interval = setInterval(() => {
+      fetchTokens(false)
+    }, 5000)
+
+    // Cleanup interval on component unmount
+    return () => clearInterval(interval)
   }, [])
 
   return (
@@ -57,23 +87,27 @@ export default function Home() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onFocus={handleSearchFocus}
-                  className="w-full pl-10 text-sm h-10 sm:h-11"
+                  className="w-full pl-10 text-sm sm:text-base h-10 sm:h-11 font-sans"
                 />
               </div>
               <CreateAdDialog />
             </div>
 
             <div className="flex gap-2 overflow-x-auto hide-scrollbar lg:grid lg:grid-cols-6 lg:gap-2 lg:overflow-visible">
-              <FeaturedAdToken index={0} />
-              <FeaturedAdToken index={1} />
-              <FeaturedAdToken index={2} />
-              <FeaturedAdToken index={3} />
-              <FeaturedAdToken index={4} />
-              <FeaturedAdToken index={5} />
+              {!isLoading && (
+                <>
+                  <FeaturedAdToken index={0} />
+                  <FeaturedAdToken index={1} />
+                  <FeaturedAdToken index={2} />
+                  <FeaturedAdToken index={3} />
+                  <FeaturedAdToken index={4} />
+                  <FeaturedAdToken index={5} />
+                </>
+              )}
             </div>
 
             {/* Token Table */}
-            <TokenTable tokens={tokens} searchQuery={searchQuery} />
+            <TokenTable tokens={tokens} searchQuery={searchQuery} isLoading={isLoading} />
           </div>
 
           {/* Sidebar */}

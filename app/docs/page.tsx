@@ -34,11 +34,11 @@ export default function DocsPage() {
         <div className="text-center mb-16">
           <div className="flex items-center justify-center gap-3 mb-6">
             
-            <h1 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-primary via-cyan-400 to-primary bg-clip-text text-transparent">
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-primary via-cyan-400 to-primary bg-clip-text text-transparent font-sans">
               Documentation
             </h1>
           </div>
-          <p className="text-xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
+          <p className="text-sm sm:text-base text-muted-foreground max-w-3xl mx-auto leading-relaxed font-sans">
             Complete guide to mastering the Dexpath terminal for Solana token tracking and trading. Learn how to detect
             paid signals, track new launches, and execute trades with lightning speed.
           </p>

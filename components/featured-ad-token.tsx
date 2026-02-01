@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Copy } from "lucide-react"
 import type { TokenRow } from "@/lib/mock"
 import { fetchPumpFunTokens } from "@/lib/api"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export function FeaturedAdToken({ index = 0 }: { index?: number }) {
   const [token, setToken] = useState<TokenRow | null>(null)
@@ -22,12 +23,30 @@ export function FeaturedAdToken({ index = 0 }: { index?: number }) {
 
     loadFeaturedToken()
 
-    // Refresh every 30 seconds
-    const interval = setInterval(loadFeaturedToken, 30000)
+    // Refresh every 10 seconds
+    const interval = setInterval(loadFeaturedToken, 10000)
     return () => clearInterval(interval)
   }, [index])
 
-  if (!token) return null
+  if (!token) {
+    return (
+      <Card className="border-primary/20 bg-secondary/30 relative min-w-[180px] lg:min-w-0 lg:w-full flex-shrink-0 h-9">
+        <CardContent className="p-0 h-full flex items-center px-2">
+          <div className="flex items-center justify-between gap-2 w-full">
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <Skeleton className="h-6 w-6 rounded-full" />
+              <div className="flex flex-col flex-1 min-w-0">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-2 w-24 mt-1" />
+              </div>
+            </div>
+            <Skeleton className="h-6 w-12 rounded" />
+          </div>
+          <div className="absolute top-0.5 right-1.5 text-[7px] text-muted-foreground font-medium">Ads</div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   const formatMC = (mc: number) => {
     if (mc >= 1_000_000) return `${(mc / 1_000_000).toFixed(0)}M`
@@ -54,14 +73,14 @@ export function FeaturedAdToken({ index = 0 }: { index?: number }) {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="size-5 p-0 hover:bg-primary/20 ml-0.5"
+                  className="h-2.5 w-2.5 p-0 hover:bg-primary/20 ml-0.5"
                   onClick={(e) => {
                     e.stopPropagation()
                     navigator.clipboard.writeText(token.address)
                   }}
                   title="Copy CA"
                 >
-                  <Copy className="size-2.5 text-muted-foreground" />
+                  <Copy className="text-muted-foreground w-1.5 h-1.5" />
                 </Button>
               </div>
             </div>

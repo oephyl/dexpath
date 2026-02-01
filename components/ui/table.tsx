@@ -4,15 +4,11 @@ import * as React from 'react'
 
 import { cn } from '@/lib/utils'
 
-function Table({
-  className,
-  wrapperClassName,
-  ...props
-}: React.ComponentProps<'table'> & { wrapperClassName?: string }) {
+function Table({ className, ...props }: React.ComponentProps<'table'>) {
   return (
     <div
       data-slot="table-container"
-      className={cn("relative w-full overflow-x-auto", wrapperClassName)}
+      className="relative w-full overflow-x-auto"
     >
       <table
         data-slot="table"
@@ -27,7 +23,7 @@ function TableHeader({ className, ...props }: React.ComponentProps<'thead'>) {
   return (
     <thead
       data-slot="table-header"
-      className={cn('sticky top-0 z-20 bg-background [&_tr]:border-b shadow-[0_1px_0_0_hsl(var(--border))]', className)}
+      className={cn('[&_tr]:border-b', className)}
       {...props}
     />
   )
@@ -61,7 +57,7 @@ function TableRow({ className, ...props }: React.ComponentProps<'tr'>) {
     <tr
       data-slot="table-row"
       className={cn(
-        'hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors',
+        'border-b transition-colors data-[state=selected]:bg-muted',
         className,
       )}
       {...props}
@@ -74,7 +70,7 @@ function TableHead({ className, ...props }: React.ComponentProps<'th'>) {
     <th
       data-slot="table-head"
       className={cn(
-        'text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap bg-background [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
+        'text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
         className,
       )}
       {...props}

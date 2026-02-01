@@ -25,6 +25,7 @@ export type TokenRow = {
   launchpad?: string // Added to support filtering by launchpad (pumpfun, bags, heaven, etc.)
   mint?: string // Mint address
   creator?: string // Creator address
+  bondingCurve?: number | { progress: number } // Bonding curve progress (0-1 or 0-100)
 }
 
 export type SignalEvent = {

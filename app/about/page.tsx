@@ -26,7 +26,7 @@ export default function AboutPage() {
   return (
     <div className="min-h-screen bg-background">
       <Suspense fallback={null}>
-        <TopNav searchQuery="" onSearchChange={() => {}} />
+        <TopNav />
       </Suspense>
 
       <main className="container mx-auto px-4 py-12 max-w-6xl">
@@ -35,8 +35,8 @@ export default function AboutPage() {
           <div className="flex items-center justify-center gap-4 mb-6">
             <Image src="/images/logo-only.png" alt="Dexpath" width={120} height={120} />
           </div>
-          <p className="text-xl sm:text-2xl lg:text-3xl font-bold mb-3 text-balance font-sans">Solana's Premier Paid Signals Terminal</p>
-          <p className="text-sm sm:text-base text-muted-foreground max-w-3xl mx-auto leading-relaxed font-sans">
+          <p className="text-2xl font-bold mb-3 text-balance">Solana's Premier Paid Signals Terminal</p>
+          <p className="text-lg text-muted-foreground max-w-3xl mx-auto leading-relaxed">
             Real-time detection and tracking of marketing campaigns across the Solana ecosystem. Identify tokens with
             active promotion, track boost levels, and execute trades at lightning speed.
           </p>

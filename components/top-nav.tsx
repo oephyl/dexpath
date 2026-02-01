@@ -25,31 +25,31 @@ export function TopNav() {
 
           {/* Navigation - Hidden on mobile, centered on desktop */}
           <nav className="hidden md:flex items-center gap-1.5 lg:gap-2 absolute left-1/2 -translate-x-1/2">
-            <Button variant="ghost" size="sm" className="text-xs sm:text-sm gap-1.5 px-3 h-8 font-sans" asChild>
+            <Button variant="ghost" size="sm" className="text-xs gap-1.5 px-3 h-8" asChild>
               <Link href="/featured">
                 <Star className="h-3.5 w-3.5" />
                 Featured
               </Link>
             </Button>
-            <Button variant="ghost" size="sm" className="text-xs sm:text-sm gap-1.5 px-3 h-8 font-sans" asChild>
+            <Button variant="ghost" size="sm" className="text-xs gap-1.5 px-3 h-8" asChild>
               <Link href="/docs">
                 <BookOpen className="h-3.5 w-3.5" />
                 Docs
               </Link>
             </Button>
-            <Button variant="ghost" size="sm" className="text-xs sm:text-sm gap-1.5 px-3 h-8 font-sans" asChild>
+            <Button variant="ghost" size="sm" className="text-xs gap-1.5 px-3 h-8" asChild>
               <Link href="/about">
                 <Info className="h-3.5 w-3.5" />
                 About
               </Link>
             </Button>
-            <Button variant="ghost" size="sm" className="text-xs sm:text-sm gap-1.5 px-3 h-8 font-sans" asChild>
+            <Button variant="ghost" size="sm" className="text-xs gap-1.5 px-3 h-8" asChild>
               <Link href="/roadmap">
                 <MapPin className="h-3.5 w-3.5" />
                 Roadmap
               </Link>
             </Button>
-            <Button variant="ghost" size="sm" className="text-xs sm:text-sm gap-1.5 px-3 h-8 font-sans" asChild>
+            <Button variant="ghost" size="sm" className="text-xs gap-1.5 px-3 h-8" asChild>
               <Link href="/request">
                 <MessageSquarePlus className="h-3.5 w-3.5" />
                 Request
@@ -59,14 +59,14 @@ export function TopNav() {
 
           {/* Right - Status */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Badge variant="outline" className="gap-1.5 border-primary/50 bg-primary/10 text-primary px-2 py-1 font-sans">
+            <Badge variant="outline" className="gap-1.5 border-primary/50 bg-primary/10 text-primary px-2 py-1">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-full w-full bg-primary"></span>
               </span>
-              <span className="text-xs sm:text-sm font-medium">LIVE</span>
+              <span className="text-[10px] sm:text-xs font-medium">LIVE</span>
             </Badge>
-            <span className="text-xs sm:text-sm text-muted-foreground hidden xl:inline whitespace-nowrap font-sans">
+            <span className="text-[9px] sm:text-[10px] text-muted-foreground hidden xl:inline whitespace-nowrap">
               updated just now
             </span>
           </div>

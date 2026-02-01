@@ -1,52 +1,64 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { mapPumpFunTokenToTokenRow } from "@/lib/api"
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ address: string }> }) {
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ address: string }> }) {
   try {
-    const resolvedParams = await params
-    console.log("[v0] Fetching token detail for:", resolvedParams.address)
+    const { address } = await params
+    console.log("[v0] Fetching token detail for:", address)
 
-    // Fetch from the external API without limit
-    const response = await fetch("https://pump-api-pi.vercel.app/api/v1/new-token", {
+    const apiUrl = `https://api.jup.ag/tokens/v2/search?query=${address}`
+
+    const apiKey = process.env.JUPITER_API_KEY
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    }
+    if (apiKey) {
+      headers["x-api-key"] = apiKey
+    } else {
+      console.warn("[v0] JUPITER_API_KEY is not set; calling without API key")
+    }
+
+    const response = await fetch(apiUrl, {
+      method: "GET",
+      headers,
       cache: "no-store",
     })
 
     if (!response.ok) {
-      console.log("[v0] Token API response failed:", response.status)
-      return NextResponse.json({ success: false, error: "Failed to fetch token data" }, { status: 500 })
+      throw new Error(`API request failed: ${response.status}`)
     }
 
     const apiData = await response.json()
     console.log("[v0] API returned tokens count:", apiData?.data?.length || 0)
 
-    // Find the specific token by address (could be mint address)
-    const tokenData = apiData?.data?.find((token: any) => 
-      token.address === resolvedParams.address || token.mint === resolvedParams.address
-    )
-
+    // Find the specific token by address
+    const tokenData = apiData?.data
+    console.log(tokenData.id)
     if (!tokenData) {
       console.log("[v0] Token not found in API data")
       return NextResponse.json({ success: false, error: "Token not found" }, { status: 404 })
     }
 
-    console.log("[v0] Found token data:", {
-      address: tokenData.address,
-      mint: tokenData.mint,
-      creator: tokenData.creator,
-      name: tokenData.name,
-      symbol: tokenData.symbol
-    })
+    // Map the token data
+    const mappedToken = {
+      address: tokenData.id || "",
+      name: tokenData.name || "Unknown",
+      symbol: tokenData.symbol || "???",
+      logo: tokenData.icon || "/placeholder.svg",
+      mc: tokenData.mcap || 0,
+      price: tokenData.usdPrice || 0,
+      change5m: tokenData.stats5m?.priceChange || 0,
+      liquidity: tokenData.liquidity || 0,
+      volume24h: 0,
+      updatedAt: tokenData.updatedAt ? new Date(tokenData.updatedAt * 1000).toISOString() : new Date().toISOString(),
+      signals: [],
+      boostCount: undefined,
+      launchpad: tokenData.launchpad || false,
+      bondingCurve: tokenData.bondingCurve || null,
+    }
 
-    // Use the same mapping function as the main API to ensure consistency
-    const mappedToken = mapPumpFunTokenToTokenRow(tokenData)
-
-    console.log("[v0] Token detail mapped:", {
-      address: mappedToken.address,
-      mint: mappedToken.mint,
-      creator: mappedToken.creator,
-      name: mappedToken.name
-    })
-    
+    console.log("[v0] Token detail found and mapped")
     return NextResponse.json({ success: true, data: mappedToken })
   } catch (error) {
     console.error("[v0] Error in token detail API:", error)

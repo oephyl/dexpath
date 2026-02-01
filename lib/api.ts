@@ -124,10 +124,10 @@ export async function fetchPumpFunTokens(): Promise<TokenRow[]> {
   }
 }
 
-export async function fetchTrendingTokens(): Promise<TokenRow[]> {
+export async function fetchTrendingTokens(timeframe: "5m" | "1h" | "24h" = "5m"): Promise<TokenRow[]> {
   try {
-    console.log("[v0] Fetching trending tokens from pump.fun API...")
-    const response = await fetch("/api/trending-tokens")
+    console.log("[v0] Fetching trending tokens from Jupiter API...", timeframe)
+    const response = await fetch(`/api/trending-tokens?timeframe=${encodeURIComponent(timeframe)}`)
 
     console.log("[v0] Trending API response status:", response.status)
 
@@ -136,27 +136,43 @@ export async function fetchTrendingTokens(): Promise<TokenRow[]> {
     }
 
     const data = await response.json()
-    console.log("[v0] Trending API response data:", data.success ? "success" : "error")
-
-    // Handle different response formats
-    let pumpTokens: PumpFunToken[] = []
-
-    if (Array.isArray(data)) {
-      pumpTokens = data
-    } else if (data.data && Array.isArray(data.data)) {
-      pumpTokens = data.data
-    } else if (data.tokens && Array.isArray(data.tokens)) {
-      pumpTokens = data.tokens
-    } else {
-      console.error("[v0] Unexpected trending API response format:", data)
+    // Jupiter route returns raw array or object with data array
+    const rawTokens: any[] = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : []
+    if (!Array.isArray(rawTokens)) {
+      console.error("[v0] Unexpected trending API response format:", Object.keys(data || {}))
       return []
     }
 
-    console.log("[v0] Trending tokens count:", pumpTokens.length)
+    console.log("[v0] Trending tokens count:", rawTokens.length)
 
-    const mappedTokens = pumpTokens.slice(0, 4).map(mapPumpFunTokenToTokenRow)
-    console.log("[v0] Returning trending tokens:", mappedTokens.length)
-    return mappedTokens
+    // Use Jupiter response directly (route already applies limit)
+    const top = rawTokens
+    const results: TokenRow[] = []
+    for (const item of top) {
+      const address = item?.id
+      if (!address) continue 
+      results.push({
+        address,
+        name: item.name,
+        symbol: item.symbol,
+        logo: item.icon,
+        price: Number.parseFloat(item?.usdPrice || "0"),
+        change5m: item?.stats5m?.priceChange ?? 0,
+        change1h: item?.stats1h?.priceChange ?? 0,
+        mc: item.mcap ?? 0,
+        liquidity: item?.liquidity ?? 0,
+        volume24h: item?.stats24h?.volume ?? 0,
+        updatedAt: new Date().toISOString(),
+        signals: [],
+        boostCount: undefined,
+        launchpad: item.launchpad || "-",
+        mint: address,
+        creator: item.dev,
+      })
+    }
+
+    console.log("[v0] Returning trending tokens:", results.length)
+    return results
   } catch (error) {
     console.error("[v0] Error fetching trending tokens:", error)
     return []

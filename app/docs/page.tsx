@@ -27,18 +27,18 @@ export default function DocsPage() {
   return (
     <div className="min-h-screen bg-background">
       <Suspense fallback={null}>
-        <TopNav searchQuery="" onSearchChange={() => {}} />
+        <TopNav />
       </Suspense>
 
       <main className="container mx-auto px-4 py-12 max-w-6xl">
         <div className="text-center mb-16">
           <div className="flex items-center justify-center gap-3 mb-6">
             
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-primary via-cyan-400 to-primary bg-clip-text text-transparent font-sans">
+            <h1 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-primary via-cyan-400 to-primary bg-clip-text text-transparent">
               Documentation
             </h1>
           </div>
-          <p className="text-sm sm:text-base text-muted-foreground max-w-3xl mx-auto leading-relaxed font-sans">
+          <p className="text-xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
             Complete guide to mastering the Dexpath terminal for Solana token tracking and trading. Learn how to detect
             paid signals, track new launches, and execute trades with lightning speed.
           </p>

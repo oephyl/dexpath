@@ -8,105 +8,28 @@ import Image from "next/image"
 import type { TokenRow } from "@/lib/mock"
 import { useState, useEffect, useRef } from "react"
 import { fetchTrendingTokens } from "@/lib/api"
-import { Copy } from "lucide-react"
+import { ChevronsLeft, ChevronsRight, Copy } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
 
-const mockTrendingTokens: TokenRow[] = [
-  {
-    id: "trend1",
-    name: "Trending Doge",
-    symbol: "TDOGE",
-    logo: "/pepe-frog-crypto-logo.jpg",
-    mc: 1250000,
-    price: 0.00012,
-    change5m: 45.2,
-    change1h: 32.1,
-    change24h: 128.5,
-    volume24h: 850000,
-    liquidity: 320000,
-    address: "TrendAddr1",
-    createdAt: new Date().toISOString(),
-    updated: "just now",
-    signals: [],
-  },
-  {
-    id: "trend2",
-    name: "Moon Shot",
-    symbol: "MOON",
-    logo: "/moon-dog-crypto-logo.jpg",
-    mc: 890000,
-    price: 0.00089,
-    change5m: 38.7,
-    change1h: 25.4,
-    change24h: 95.2,
-    volume24h: 620000,
-    liquidity: 280000,
-    address: "TrendAddr2",
-    createdAt: new Date().toISOString(),
-    updated: "just now",
-    signals: [],
-  },
-  {
-    id: "trend3",
-    name: "Rocket Launch",
-    symbol: "RCKT",
-    logo: "/rocket-moon-crypto-logo.jpg",
-    mc: 2100000,
-    price: 0.00021,
-    change5m: 52.3,
-    change1h: 41.8,
-    change24h: 167.9,
-    volume24h: 1200000,
-    liquidity: 450000,
-    address: "TrendAddr3",
-    createdAt: new Date().toISOString(),
-    updated: "just now",
-    signals: [],
-  },
-  {
-    id: "trend4",
-    name: "Diamond Hands",
-    symbol: "DMNDS",
-    logo: "/baby-dog-crypto-logo.jpg",
-    mc: 750000,
-    price: 0.000075,
-    change5m: 29.6,
-    change1h: 18.3,
-    change24h: 72.4,
-    volume24h: 520000,
-    liquidity: 210000,
-    address: "TrendAddr4",
-    createdAt: new Date().toISOString(),
-    updated: "just now",
-    signals: [],
-  },
-  {
-    id: "trend5",
-    name: "Pump King",
-    symbol: "PKING",
-    logo: "/shiba-crown-crypto-logo.jpg",
-    mc: 1680000,
-    price: 0.000168,
-    change5m: 41.2,
-    change1h: 35.7,
-    change24h: 145.8,
-    volume24h: 980000,
-    liquidity: 390000,
-    address: "TrendAddr5",
-    createdAt: new Date().toISOString(),
-    updated: "just now",
-    signals: [],
-  },
-]
+// No mock tokens; data comes from API
 
-export function TokenTrending() {
+export function TokenTrending({
+  sidebarHidden,
+  onToggleSidebar,
+}: {
+  sidebarHidden?: boolean
+  onToggleSidebar?: () => void
+}) {
   const router = useRouter()
-  const [trendingTokens, setTrendingTokens] = useState<TokenRow[]>(mockTrendingTokens)
+  const [trendingTokens, setTrendingTokens] = useState<TokenRow[]>([])
   const [newAddresses, setNewAddresses] = useState<Set<string>>(new Set())
   const prevAddressesRef = useRef<Set<string>>(new Set())
-  const [timeframe, setTimeframe] = useState<"24h" | "4h" | "1m">("24h")
+  const [timeframe, setTimeframe] = useState<"24h" | "1h" | "5m">("24h")
   const [isRateLimited, setIsRateLimited] = useState(false)
 
   useEffect(() => {
+    if (sidebarHidden) return
+
     const loadTrendingTokens = async () => {
       if (isRateLimited) {
         console.log("[v0] Skipping trending fetch - rate limited")
@@ -114,7 +37,7 @@ export function TokenTrending() {
       }
 
       try {
-        const tokens = await fetchTrendingTokens()
+        const tokens = await fetchTrendingTokens(timeframe)
         if (tokens.length > 0) {
           setTrendingTokens(tokens)
           setIsRateLimited(false)
@@ -124,17 +47,16 @@ export function TokenTrending() {
         if (error.message?.includes("429") || error.message?.includes("Too Many Requests")) {
           console.log("[v0] Rate limited - using mock data and backing off")
           setIsRateLimited(true)
-          setTrendingTokens(mockTrendingTokens)
           setTimeout(() => setIsRateLimited(false), 5 * 60 * 1000)
         }
       }
     }
 
     loadTrendingTokens()
-    const interval = setInterval(loadTrendingTokens, 60000)
+    const interval = setInterval(loadTrendingTokens, 10000)
 
     return () => clearInterval(interval)
-  }, [isRateLimited])
+  }, [isRateLimited, timeframe, sidebarHidden])
 
   useEffect(() => {
     const currentAddresses = new Set(trendingTokens.map((t) => t.address))
@@ -179,14 +101,32 @@ export function TokenTrending() {
     <Card className="h-fit">
       <CardHeader className="pb-2 sm:pb-3">
         <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-sm sm:text-base">Token Trending</CardTitle>
-          <div className="flex gap-1">
-            {["24h", "4h", "1m"].map((tf) => (
+          <div className="flex items-center gap-2">
+            {typeof onToggleSidebar === "function" && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-6 w-6 p-0"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleSidebar()
+                }}
+                aria-label={sidebarHidden ? "Show right sidebar" : "Hide right sidebar"}
+                title={sidebarHidden ? "Show" : "Hide"}
+              >
+                {sidebarHidden ? <ChevronsLeft className="h-4 w-4" /> : <ChevronsRight className="h-4 w-4" />}
+              </Button>
+            )}
+            <CardTitle className="text-sm sm:text-base">Token Trending</CardTitle>
+          </div>
+          <div className="flex items-center gap-1">
+            {["24h", "1h", "5m"].map((tf) => (
               <Badge
                 key={tf}
                 variant={timeframe === tf ? "default" : "outline"}
                 className="cursor-pointer text-[9px] sm:text-[10px] px-1.5 py-0.5 h-5"
-                onClick={() => setTimeframe(tf as "24h" | "4h" | "1m")}
+                onClick={() => setTimeframe(tf as "24h" | "1h" | "5m")}
               >
                 {tf}
               </Badge>
@@ -195,13 +135,38 @@ export function TokenTrending() {
         </div>
       </CardHeader>
       <CardContent className="space-y-1.5 sm:space-y-2">
-        {displayTokens.map((token) => (
+        {displayTokens.length === 0 ? (
+          Array.from({ length: 5 }).map((_, i) => (
+            <Card key={`trend-skel-${i}`} className="border-primary/20 bg-secondary/30 h-9">
+              <CardContent className="p-0 h-full flex items-center px-2">
+                <div className="flex items-center justify-between gap-2 w-full">
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                    <Skeleton className="h-6 w-6 rounded-full" />
+                    <div className="flex flex-col flex-1 min-w-0">
+                      <Skeleton className="h-3 w-12" />
+                      <Skeleton className="h-2 w-20 mt-1" />
+                    </div>
+                  </div>
+                  <Skeleton className="h-4 w-12" />
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        ) : (
+          displayTokens.map((token) => (
           <Card
             key={token.address}
             className={`border-primary/20 bg-secondary/30 hover:bg-secondary/50 transition-colors cursor-pointer h-9 ${
               newAddresses.has(token.address) ? "animate-slide-in" : ""
             }`}
-            onClick={() => router.push(`/token/${token.address}`)}
+            onClick={() => {
+              try {
+                localStorage.setItem(`token_${token.address}`, JSON.stringify(token))
+              } catch (e) {
+                console.warn("[v0] Failed to persist token in localStorage", e)
+              }
+              router.push(`/token/${token.address}`)
+            }}
           >
             <CardContent className="p-0 h-full flex items-center px-2">
               <div className="flex items-center justify-between gap-2 w-full">
@@ -222,30 +187,34 @@ export function TokenTrending() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="size-5 p-0 hover:bg-primary/20 ml-0.5"
+                        className="h-2.5 w-2.5 p-0 hover:bg-primary/20 ml-0.5"
                         onClick={(e) => {
                           e.stopPropagation()
                           navigator.clipboard.writeText(token.address)
                         }}
                         title="Copy CA"
                       >
-                        <Copy className="size-2.5 text-muted-foreground" />
+                        <Copy className="h-1.5 w-1.5 text-muted-foreground" />
                       </Button>
                     </div>
                   </div>
                 </div>
-                <span
-                  className={`font-bold text-[10px] sm:text-xs px-2 ${
-                    token.change5m >= 0 ? "text-green-500" : "text-red-500"
-                  }`}
-                >
-                  {token.change5m >= 0 ? "+" : ""}
-                  {token.change5m.toFixed(1)}%
-                </span>
+                {(() => {
+                  const change = timeframe === "5m" ? token.change5m : token.change1h
+                  return (
+                    <span
+                      className={`font-bold text-[10px] sm:text-xs px-2 ${change >= 0 ? "text-green-500" : "text-red-500"}`}
+                    >
+                      {change >= 0 ? "+" : ""}
+                      {change.toFixed(1)}%
+                    </span>
+                  )
+                })()}
               </div>
             </CardContent>
           </Card>
-        ))}
+          ))
+        )}
       </CardContent>
     </Card>
   )

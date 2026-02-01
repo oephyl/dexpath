@@ -1,18 +1,27 @@
 "use client"
+import { Skeleton } from "@/components/ui/skeleton" 
 
-import type React from "react"
-import { useState, useEffect, useRef } from "react"
+import { Fragment, useState, useEffect, useRef, useMemo } from "react"
+import type { MouseEvent } from "react"
 import { useRouter } from "next/navigation"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { SignalBadge } from "./signal-badge"
 import { formatMarketCap, formatPrice, formatNumber } from "@/lib/format"
-import type { TokenRow } from "@/lib/mock"
+import type { SignalType, TokenRow } from "@/lib/mock"
 import Image from "next/image"
-import { Copy, Target, Rocket, Construction, CheckCircle2, Heart, Repeat2, MessageCircle, Plus } from "lucide-react"
+import { Copy, Target, Rocket, Construction, CheckCircle2, XCircle, AlertTriangle, Heart, Repeat2, MessageCircle, Plus, SearchX } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { useToast } from "@/hooks/use-toast"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer"
 import {
   Dialog,
   DialogContent,
@@ -25,14 +34,40 @@ import {
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { fetchCTOTokens, fetchDexPaidTokens, fetchBoostTokens } from "@/lib/api"
+import { fetchCTOTokens } from "@/lib/api"
+import { generateTokenSummary } from "@/lib/token-summary"
 
 interface TokenTableProps {
   tokens: TokenRow[]
   newestTokenAddress?: string | null
   searchQuery?: string
   onTokenClick?: (token: TokenRow) => void
-  isLoading?: boolean
+}
+
+interface KOLCall {
+  id: string
+  kolName: string
+  kolHandle: string
+  kolAvatar: string
+  kolFollowers: number
+  kolVerified: boolean
+  token: {
+    address: string
+    name: string
+    symbol: string
+    logo: string
+    price: number
+    change5m: number
+    mc: number
+  }
+  postContent: string
+  postUrl: string
+  postTime: string
+  engagement: {
+    likes: number
+    retweets: number
+    replies: number
+  }
 }
 
 interface PrelaunchProject {
@@ -45,6 +80,753 @@ interface PrelaunchProject {
   description: string
   launchDate: string
 }
+
+type PresetKey = "top_traded" | "gainers" | "losers"
+
+type RuntimeTokenExtensions = {
+  confidenceScore?: number
+  momentumState?: "ACCELERATING" | "STABLE" | "COOLING"
+  riskLevel?: "LOW" | "MEDIUM" | "HIGH"
+  tradeModeFit?: "SNIPER" | "SCALPER" | "SWING"
+  priceChange24h?: number
+  // Mobula pool/source identifier (runtime-only; New tab)
+  source?: string
+  // Proxy spike probability (runtime-only; New tab)
+  spikeProbability?: number
+  change15m?: number
+  priceChange5m?: number
+  volume5m?: number
+  volume15m?: number
+  // Mobula/terminal indicators (optional, runtime only)
+  buyCount?: number
+  sellCount?: number
+  organicPct?: number
+  top10HoldingsPct?: number
+  devHoldingsPct?: number
+  bondingPct?: number
+  createdAt?: string
+  snipersCount?: number
+  bundlersCount?: number
+  insidersCount?: number
+  liquidityDeltaPct?: number
+  priceChange1m?: number
+  volume1m?: number
+  buyers1m?: number
+  proTradersCount?: number
+  smartTradersCount?: number
+  freshTradersCount?: number
+  tradeDecision?: "BUY" | "WATCH" | "SKIP"
+}
+
+type TokenRowRuntime = TokenRow & RuntimeTokenExtensions
+
+const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+const pickNumber = (obj: any, keys: string[]) => {
+  for (const key of keys) {
+    const value = obj?.[key]
+    if (typeof value === "number" && Number.isFinite(value)) return value
+  }
+  return undefined
+}
+
+const pickString = (obj: any, keys: string[]) => {
+  for (const key of keys) {
+    const value = obj?.[key]
+    if (typeof value === "string" && value.length > 0) return value
+  }
+  return undefined
+}
+
+const normalizeLaunchpadIconKeyFromSource = (source?: string) => {
+  if (!source) return undefined
+  const normalized = source.toLowerCase()
+  if (normalized === "raydium-launchlab") return "raydium"
+  if (normalized === "meteora-dyn2") return "meteora"
+  return normalized
+}
+
+const normalizePct = (value?: number) => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined
+  // Accept either 0..1 ratio or 0..100 percent.
+  const pct = value <= 1 ? value * 100 : value
+  return clampNumber(pct, 0, 100)
+}
+
+const getConfidenceColorClass = (score: number) => {
+  if (score <= 40) return "bg-red-500"
+  if (score <= 70) return "bg-yellow-500"
+  return "bg-green-500"
+}
+
+const getRiskBadgeClass = (risk?: TokenRowRuntime["riskLevel"]) => {
+  if (risk === "HIGH") return "bg-amber-500/20 text-amber-600 border-amber-500/30"
+  if (risk === "MEDIUM") return "bg-yellow-500/15 text-yellow-600 border-yellow-500/30"
+  return "bg-green-500/15 text-green-600 border-green-500/30"
+}
+
+const getMomentumBadgeClass = (m?: TokenRowRuntime["momentumState"]) => {
+  if (m === "ACCELERATING") return "bg-green-500/15 text-green-600 border-green-500/30"
+  if (m === "COOLING") return "bg-muted/40 text-muted-foreground border-border"
+  return "bg-secondary/40 text-foreground/70 border-border"
+}
+
+function ConfidenceBar({ score }: { score: number }) {
+  const clamped = clampNumber(score, 0, 100)
+  const color = getConfidenceColorClass(clamped)
+  return (
+    <div
+      className="h-1.5 w-10 sm:w-12 rounded-full bg-secondary/60 overflow-hidden"
+      title={`Confidence: ${clamped}/100`}
+      aria-label={`Confidence score ${clamped} out of 100`}
+      role="img"
+    >
+      <div className={`h-full ${color}`} style={{ width: `${clamped}%` }} />
+    </div>
+  )
+}
+
+function MiniBar({ value, title }: { value: number; title: string }) {
+  const clamped = clampNumber(value, 0, 100)
+  const color = getConfidenceColorClass(clamped)
+  return (
+    <div className="flex items-center gap-2" title={title} aria-label={title}>
+      <div className="h-1.5 w-16 rounded-full bg-secondary/60 overflow-hidden">
+        <div className={`h-full ${color}`} style={{ width: `${clamped}%` }} />
+      </div>
+      <span className="text-[9px] sm:text-[10px] text-muted-foreground tabular-nums">{Math.round(clamped)}%</span>
+    </div>
+  )
+}
+
+const getDecisionClass = (decision?: TokenRowRuntime["tradeDecision"]) => {
+  if (decision === "BUY") return "bg-green-500/15 text-green-600 border-green-500/30"
+  if (decision === "WATCH") return "bg-yellow-500/15 text-yellow-600 border-yellow-500/30"
+  return "bg-red-500/15 text-red-600 border-red-500/30"
+}
+
+const getSpikeBadgeClass = (probability: number) => {
+  if (probability < 40) return "bg-red-500/15 text-red-600 border-red-500/30"
+  if (probability < 60) return "bg-yellow-500/15 text-yellow-600 border-yellow-500/30"
+  if (probability <= 80) return "bg-green-500/15 text-green-600 border-green-500/30"
+  return "bg-amber-500/20 text-amber-600 border-amber-500/30"
+}
+
+const getSpikeBand = (probability: number) => {
+  if (probability < 40) return { label: "Random / dead", tone: "text-red-600" }
+  if (probability < 60) return { label: "Speculative", tone: "text-yellow-600" }
+  if (probability <= 80) return { label: "High-probability momentum", tone: "text-green-600" }
+  return { label: "Overheated / dump risk", tone: "text-amber-600" }
+}
+
+const computeSpikeProbabilityProxy = (
+  token: Pick<
+    TokenRowRuntime,
+    | "change5m"
+    | "priceChange1m"
+    | "change15m"
+    | "volume1m"
+    | "volume5m"
+    | "volume15m"
+    | "volume24h"
+    | "liquidity"
+    | "mc"
+    | "buyCount"
+    | "sellCount"
+    | "createdAt"
+    | "updatedAt"
+  >,
+) => {
+  const mc = token.mc ?? 0
+  const liq = token.liquidity ?? 0
+
+  const change1m = token.priceChange1m
+  const shortChange = (typeof change1m === "number" && Number.isFinite(change1m) ? change1m : token.change5m) ?? 0
+  const change15m = token.change15m
+
+  const shortDivisor = typeof change1m === "number" && Number.isFinite(change1m) ? 10 : 30
+  const priceMomentumBase = clampNumber(shortChange / shortDivisor, 0, 1)
+  const priceMomentum =
+    typeof change15m === "number" && Number.isFinite(change15m)
+      ? clampNumber(0.7 * priceMomentumBase + 0.3 * clampNumber(change15m / 50, 0, 1), 0, 1)
+      : priceMomentumBase
+
+  const volume5m =
+    token.volume5m ?? (typeof token.volume1m === "number" && Number.isFinite(token.volume1m) ? token.volume1m * 5 : undefined)
+  const volume15m =
+    token.volume15m ??
+    (typeof token.volume1m === "number" && Number.isFinite(token.volume1m) ? token.volume1m * 15 : undefined)
+
+  const avgVolume30m = (() => {
+    if (typeof volume15m === "number" && volume15m > 0) return volume15m * 2
+    if (typeof volume5m === "number" && volume5m > 0) return volume5m * 6
+    const vol24h = token.volume24h
+    if (typeof vol24h === "number" && vol24h > 0) return vol24h / 48 // 30m buckets in 24h
+    return undefined
+  })()
+
+  const volumeAcceleration =
+    typeof volume5m === "number" && typeof avgVolume30m === "number" && avgVolume30m > 0
+      ? clampNumber(volume5m / avgVolume30m, 0, 3) / 3
+      : 0
+
+  const liquidityRatio = mc > 0 && liq > 0 ? clampNumber(liq / mc, 0, 1) : 0
+
+  const marketCapBias = (() => {
+    if (mc <= 0) return 0.6
+    if (mc <= 1_000_000) return 1
+    if (mc <= 5_000_000) return 0.8
+    if (mc <= 20_000_000) return 0.6
+    return 0.4
+  })()
+
+  const ageMinutes = (() => {
+    const iso = token.createdAt ?? token.updatedAt
+    if (!iso) return undefined
+    const ms = Date.parse(iso)
+    if (!Number.isFinite(ms)) return undefined
+    return (Date.now() - ms) / 60000
+  })()
+  const recencyFactor = typeof ageMinutes === "number" ? (ageMinutes < 60 ? 1 : ageMinutes < 360 ? 0.8 : 0.6) : 0.7
+
+  // Optional extras: buy/sell ratio, tx velocity proxies.
+  const buySellFactor = (() => {
+    if (typeof token.buyCount === "number" && typeof token.sellCount === "number") {
+      const ratio = token.buyCount / Math.max(token.sellCount, 1)
+      return clampNumber((ratio - 1) / 4, 0, 0.15) // up to +0.15
+    }
+    return 0
+  })()
+
+  const baseScore =
+    0.35 * priceMomentum + 0.25 * volumeAcceleration + 0.2 * liquidityRatio + 0.1 * marketCapBias + 0.1 * recencyFactor
+  const score = clampNumber(baseScore + buySellFactor, 0, 1)
+  return clampNumber(score * 100, 0, 100)
+}
+
+const classifyMomentumRadar = (token: Pick<TokenRowRuntime, "priceChange1m" | "volume1m" | "buyers1m" | "change5m">) => {
+  const pc1m = token.priceChange1m
+  const v1m = token.volume1m
+  const b1m = token.buyers1m
+
+  if (typeof pc1m === "number" && typeof v1m === "number" && typeof b1m === "number") {
+    const isHot = pc1m >= 0.8 && b1m >= 3 && v1m >= 5_000
+    const isCooling = pc1m <= -0.4 || b1m === 0
+    if (isHot) return "ACCELERATING" as const
+    if (isCooling) return "COOLING" as const
+    return "STABLE" as const
+  }
+
+  // Fallback
+  if ((token.change5m ?? 0) >= 8) return "ACCELERATING" as const
+  if ((token.change5m ?? 0) <= -5) return "COOLING" as const
+  return "STABLE" as const
+}
+
+const decideTradeAction = (token: Pick<TokenRowRuntime, "confidenceScore" | "riskLevel" | "momentumState">) => {
+  const score = token.confidenceScore ?? 0
+  const risk = token.riskLevel
+  const mom = token.momentumState
+
+  if (score >= 70 && risk !== "HIGH" && mom === "ACCELERATING") return "BUY" as const
+  if (score >= 55 && risk !== "HIGH") return "WATCH" as const
+  return "SKIP" as const
+}
+
+const classifyTradeModeFit = (token: Pick<TokenRowRuntime, "mc" | "volume24h" | "liquidity" | "priceChange24h" | "updatedAt">) => {
+  const mc = token.mc ?? 0
+  const vol = token.volume24h ?? 0
+  const liq = token.liquidity ?? 0
+  const change24h = token.priceChange24h ?? 0
+  const volatility = Math.abs(change24h)
+  const createdOrUpdatedMs = Number.isFinite(Date.parse(token.updatedAt)) ? Date.parse(token.updatedAt) : Date.now()
+  const ageMinutes = (Date.now() - createdOrUpdatedMs) / 60000
+  const isVeryEarly = ageMinutes >= 0 && ageMinutes <= 90
+  const buyPressure = change24h > 3 && mc > 0 && vol / mc > 0.5
+
+  if (mc > 0 && mc < 50_000 && isVeryEarly && buyPressure) return "SNIPER" as const
+  if ((vol >= 750_000 || vol / Math.max(mc, 1) > 2) && volatility >= 15) return "SCALPER" as const
+  if (mc >= 1_000_000 && liq >= 50_000 && volatility <= 10 && vol >= 100_000) return "SWING" as const
+  if (mc > 0 && mc < 200_000 && volatility >= 20) return "SCALPER" as const
+  return "SWING" as const
+}
+
+const classifyRiskLevel = (token: Pick<TokenRowRuntime, "mc" | "liquidity" | "priceChange24h" | "top10HoldingsPct" | "devHoldingsPct" | "snipersCount" | "insidersCount" | "bundlersCount">) => {
+  const mc = token.mc ?? 0
+  const liq = token.liquidity ?? 0
+  const volatility = Math.abs(token.priceChange24h ?? 0)
+  const top10 = token.top10HoldingsPct
+  const devPct = token.devHoldingsPct
+  const snipers = token.snipersCount
+  const insiders = token.insidersCount
+  const bundlers = token.bundlersCount
+
+  if ((typeof snipers === "number" && snipers > 0) || (typeof insiders === "number" && insiders > 0) || (typeof bundlers === "number" && bundlers > 0)) {
+    return "HIGH" as const
+  }
+
+  if (typeof top10 === "number" && top10 >= 25) return "HIGH" as const
+  if (typeof devPct === "number" && devPct >= 15) return "HIGH" as const
+
+  if (mc > 0 && mc < 100_000) return "HIGH" as const
+  if (liq > 0 && liq < 50_000) return "HIGH" as const
+  if (volatility >= 50) return "HIGH" as const
+  if (mc > 0 && mc < 1_000_000) return "MEDIUM" as const
+  if (volatility >= 20) return "MEDIUM" as const
+  return "LOW" as const
+}
+
+const classifyMomentumState = (token: Pick<TokenRowRuntime, "change5m" | "change1h" | "priceChange24h" | "priceChange1m">) => {
+  const cShort = typeof token.priceChange1m === "number" ? token.priceChange1m : (token.change5m ?? 0)
+  const c1h = token.change1h ?? 0
+  const c24 = token.priceChange24h ?? 0
+
+  const isUsing1m = typeof token.priceChange1m === "number"
+  const accelThresh = isUsing1m ? 1.2 : 8
+  const coolThresh = isUsing1m ? -0.8 : -5
+  const relativeDivisor = isUsing1m ? 60 : 12
+
+  if (cShort >= accelThresh || (cShort > 0 && c1h > 0 && c24 > 0 && cShort > c1h / relativeDivisor)) return "ACCELERATING" as const
+  if (cShort <= coolThresh || (cShort < 0 && c1h < 0)) return "COOLING" as const
+  return "STABLE" as const
+}
+
+const computeConfidenceScore = (
+  raw: any,
+  mapped: Pick<
+    TokenRowRuntime,
+    | "mc"
+    | "volume24h"
+    | "priceChange24h"
+    | "liquidity"
+    | "updatedAt"
+    | "buyCount"
+    | "sellCount"
+    | "organicPct"
+    | "devHoldingsPct"
+    | "top10HoldingsPct"
+    | "snipersCount"
+    | "bundlersCount"
+    | "insidersCount"
+  >,
+) => {
+  let score = 50
+
+  const mc = mapped.mc ?? 0
+  const vol24h = mapped.volume24h ?? 0
+  const change24h = mapped.priceChange24h ?? 0
+  const liq = mapped.liquidity ?? 0
+
+  // Buy/Sell ratio
+  if (typeof mapped.buyCount === "number" && typeof mapped.sellCount === "number") {
+    const ratio = mapped.buyCount / Math.max(mapped.sellCount, 1)
+    if (ratio >= 3) score += 10
+    else if (ratio >= 1.5) score += 5
+    else if (ratio < 0.8) score -= 5
+  }
+
+  const buyPressure = change24h > 0 && mc > 0 && vol24h / mc > 0.5
+  if (buyPressure) score += 10
+
+  // Organic %
+  const organicPct = mapped.organicPct ?? normalizePct(
+    raw?.organic_volume_ratio ?? raw?.organicVolumeRatio ?? raw?.organic_volume_percent ?? raw?.organicVolumePercent,
+  )
+  if (typeof organicPct === "number") {
+    if (organicPct >= 70) score += 10
+    else if (organicPct >= 50) score += 5
+    else if (organicPct < 30) score -= 5
+  }
+
+  // Dev holdings %
+  const devHoldingsPct = mapped.devHoldingsPct ?? normalizePct(raw?.dev_holdings_pct ?? raw?.devHoldingsPct ?? raw?.dev_holding_percent)
+  if (typeof devHoldingsPct === "number") {
+    if (devHoldingsPct <= 5) score += 10
+    else if (devHoldingsPct <= 10) score += 5
+    else if (devHoldingsPct >= 15) score -= 5
+  }
+
+  // No insiders/snipers/bundlers
+  if (typeof mapped.snipersCount === "number") score += mapped.snipersCount === 0 ? 5 : -8
+  if (typeof mapped.bundlersCount === "number") score += mapped.bundlersCount === 0 ? 5 : -6
+  if (typeof mapped.insidersCount === "number") score += mapped.insidersCount === 0 ? 5 : -8
+
+  // Liquidity / MC ratio
+  if (mc > 0 && liq > 0) {
+    const liqRatio = liq / mc
+    if (liqRatio >= 0.2) score += 10
+    else if (liqRatio >= 0.1) score += 5
+    else if (liqRatio < 0.03) score -= 5
+  }
+
+  const holders = raw?.holders ?? raw?.holders_count ?? raw?.holderCount
+  if (typeof holders === "number" && holders > 0 && holders <= 500) score += 5
+
+  // Top holder concentration (Top10)
+  const whalePct =
+    mapped.top10HoldingsPct ??
+    normalizePct(
+      raw?.top10Holdings ??
+        raw?.top10_holdings ??
+        raw?.top10_holdings_pct ??
+        raw?.top10HoldingsPct ??
+        raw?.top_holders_pct ??
+        raw?.topHoldersPct ??
+        raw?.top_holder_pct,
+    )
+  if (typeof whalePct === "number") {
+    if (whalePct >= 25) score -= 10
+    else if (whalePct >= 15) score -= 5
+  }
+
+  // Only penalize "no socials" when socials fields are present but empty.
+  const socials = raw?.socials
+  const socialsFieldsPresent =
+    raw != null &&
+    ("socials" in (raw as object) || "twitter" in (raw as object) || "telegram" in (raw as object) || "website" in (raw as object))
+  if (socialsFieldsPresent) {
+    const hasSocials =
+      Boolean(raw?.twitter || raw?.telegram || raw?.website) ||
+      Boolean(socials?.twitter || socials?.telegram || socials?.website || socials?.discord)
+    if (!hasSocials) score -= 3
+  }
+
+  return clampNumber(score, 0, 100)
+}
+
+const extendTokenRowRuntime = (token: TokenRow): TokenRowRuntime => {
+  const priceChange24h = typeof (token as any).priceChange24h === "number" ? (token as any).priceChange24h : token.change1h
+  const base: TokenRowRuntime = {
+    ...(token as TokenRowRuntime),
+    priceChange24h,
+  }
+  const confidenceScore = computeConfidenceScore(undefined, base)
+  const momentumState = classifyMomentumState(base)
+  const riskLevel = classifyRiskLevel(base)
+  const tradeModeFit = classifyTradeModeFit(base)
+  return {
+    ...base,
+    confidenceScore,
+    momentumState,
+    riskLevel,
+    tradeModeFit,
+  }
+}
+
+const mapMobulaPulseItemToTokenRow = (item: any, launchpadFilter: string, requestedPoolTypes?: string): TokenRowRuntime | null => {
+  const address: string | undefined =
+    item?.address ?? item?.contract_address ?? item?.contractAddress ?? item?.token_address ?? item?.tokenAddress
+  if (!address || typeof address !== "string") return null
+
+  // Prefer the poolTypes we requested (when filtering by a specific launchpad),
+  // because Mobula's returned `source` can be generic and not match the filter.
+  const source =
+    (requestedPoolTypes && requestedPoolTypes !== "all" ? requestedPoolTypes : undefined) ??
+    pickString(item, [
+      "source",
+      "poolType",
+      "pool_type",
+      "poolTypes",
+      "pool_types",
+      "dex",
+      "dexName",
+      "dex_name",
+    ])
+
+  const price = item?.price ?? 0
+  const mc = item?.marketCap ?? item?.latest_market_cap ?? 0
+  const volume24h = item?.volume_24h ?? (typeof item?.volume_1h === "number" ? item.volume_1h * 24 : 0)
+  const priceChange24h = item?.price_change_24h ?? item?.price_change_1h ?? 0
+  const updatedAt = item?.latest_trade_date ?? item?.createdAt ?? new Date().toISOString()
+  const liquidity = item?.liquidity ?? item?.liquidity_usd ?? item?.liquidityUSD ?? 0
+
+  const change1h = item?.price_change_1h ?? 0
+  const change5m = item?.price_change_5m ?? item?.price_change_5min ?? item?.price_change_1h ?? 0
+  const change15m =
+    pickNumber(item, ["price_change_15m", "price_change_15min", "price_change_15", "priceChange15m", "priceChange15Min"]) ??
+    undefined
+
+  const volume5m = pickNumber(item, ["volume_5m", "volume_5min", "volume5m", "volume5Min"])
+  const volume15m = pickNumber(item, ["volume_15m", "volume_15min", "volume15m", "volume15Min"])
+
+  const name = item?.name ?? item?.token_name ?? item?.tokenName ?? "Unknown"
+  const symbol = item?.symbol ?? item?.token_symbol ?? item?.tokenSymbol ?? "???"
+  const logo = item?.logo ?? item?.image ?? item?.logo_url ?? item?.logoUrl ?? "/placeholder.svg"
+
+  const signals: SignalType[] = []
+  if (typeof priceChange24h === "number" && priceChange24h > 0) signals.push("PRICE_UP")
+  if (typeof mc === "number" && mc >= 1_000_000) signals.push("KEY_MC")
+
+  const buyCount = pickNumber(item, [
+    "buys_1min",
+    "buys_1m",
+    "buys_5min",
+    "buys_5m",
+    "buys_1h",
+    "buys_24h",
+    "buys",
+    "buy_count",
+    "buyCount",
+    "buy_count_5m",
+    "buy_count_1h",
+    "buyers_1min",
+    "buyers_5min",
+    "buyers",
+  ])
+  const sellCount = pickNumber(item, [
+    "sells_1min",
+    "sells_1m",
+    "sells_5min",
+    "sells_5m",
+    "sells_1h",
+    "sells_24h",
+    "sells",
+    "sell_count",
+    "sellCount",
+    "sell_count_5m",
+    "sell_count_1h",
+    "sellers_1min",
+    "sellers_5min",
+    "sellers",
+  ])
+
+  const derivedOrganicPct = (() => {
+    const volumePairs: Array<[string, string]> = [
+      ["organic_volume_1min", "volume_1min"],
+      ["organic_volume_5min", "volume_5min"],
+      ["organic_volume_24h", "volume_24h"],
+      ["organic_volume_1h", "volume_1h"],
+    ]
+    for (const [organicKey, totalKey] of volumePairs) {
+      const organic = pickNumber(item, [organicKey])
+      const total = pickNumber(item, [totalKey])
+      if (typeof organic === "number" && typeof total === "number" && total > 0) {
+        return clampNumber((organic / total) * 100, 0, 100)
+      }
+    }
+
+    const tradePairs: Array<[string, string]> = [
+      ["organic_trades_1min", "trades_1min"],
+      ["organic_trades_5min", "trades_5min"],
+      ["organic_trades_24h", "trades_24h"],
+      ["organic_trades_1h", "trades_1h"],
+    ]
+    for (const [organicKey, totalKey] of tradePairs) {
+      const organic = pickNumber(item, [organicKey])
+      const total = pickNumber(item, [totalKey])
+      if (typeof organic === "number" && typeof total === "number" && total > 0) {
+        return clampNumber((organic / total) * 100, 0, 100)
+      }
+    }
+    return undefined
+  })()
+
+  const organicPct =
+    derivedOrganicPct ??
+    normalizePct(
+      pickNumber(item, [
+        "organicPct",
+        "organic_pct",
+        "organic_volume_ratio",
+        "organicVolumeRatio",
+        "organic_volume_percent",
+        "organicVolumePercent",
+      ]),
+    )
+  const top10HoldingsPct = normalizePct(
+    pickNumber(item, [
+      "top10Holdings",
+      "top10HoldingsPercentage",
+      "top10_holdings",
+      "top10_holdings_pct",
+      "top10HoldingsPct",
+      "top_holders_pct",
+      "topHoldersPct",
+      "top_holder_pct",
+    ]),
+  )
+  const devHoldingsPct = normalizePct(
+    pickNumber(item, [
+      "devHoldings",
+      "devHoldingsPercentage",
+      "devHoldingsPct",
+      "dev_holdings_pct",
+      "dev_holding_percent",
+    ]),
+  )
+
+  const bondingPct = (() => {
+    const raw = pickNumber(item, [
+      "bondingPercentage",
+      "bonding_percentage",
+      "bondingPct",
+      "bonding_pct",
+      "bonding_progress",
+      "bondingProgress",
+      "bonding_curve_progress",
+      "bondingCurveProgress",
+      "bonded_percentage",
+      "bondedPercentage",
+    ])
+    return normalizePct(raw)
+  })()
+
+  const createdAt = pickString(item, ["createdAt", "created_at", "creation_date", "token_created_at", "launch_date"])
+
+  const snipersCount = pickNumber(item, ["snipersCount", "snipers_count", "snipers"])
+  const bundlersCount = pickNumber(item, ["bundlersCount", "bundlers_count", "bundlers"])
+  const insidersCount = pickNumber(item, ["insidersCount", "insiders_count", "insiders"])
+
+  const liquidityDeltaPct = normalizePct(
+    pickNumber(item, ["liquidity_delta_pct", "liquidityDeltaPct", "liquidity_change_pct", "liquidity_change_24h"]),
+  )
+
+  const priceChange1m = pickNumber(item, ["price_change_1min", "price_change_1m", "priceChange1m", "priceChange1Min"])
+  const volume1m = pickNumber(item, ["volume_1min", "volume_1m", "volume1m", "volume1Min"])
+  const buyers1m = pickNumber(item, ["buyers_1min", "buyers_1m", "buyers1m", "buyers1Min"])
+
+  const proTradersCount = pickNumber(item, ["proTradersCount", "pro_traders_count", "proTraders"])
+  const smartTradersCount = pickNumber(item, ["smartTradersCount", "smart_traders_count", "smartTraders"])
+  const freshTradersCount = pickNumber(item, ["freshTradersCount", "fresh_traders_count", "freshTraders"])
+
+  const mappedBase: TokenRowRuntime = {
+    address,
+    name,
+    symbol,
+    logo,
+    source,
+    price: typeof price === "number" ? price : 0,
+    // For New Coins, treat the short-term column as 1m (fallback to 5m when 1m unavailable)
+    change5m: typeof priceChange1m === "number" ? priceChange1m : typeof change5m === "number" ? change5m : 0,
+    priceChange5m: typeof change5m === "number" ? change5m : undefined,
+    change1h: typeof change1h === "number" ? change1h : 0,
+    mc: typeof mc === "number" ? mc : 0,
+    liquidity: typeof liquidity === "number" ? liquidity : 0,
+    volume24h: typeof volume24h === "number" ? volume24h : 0,
+    updatedAt: typeof updatedAt === "string" ? updatedAt : new Date().toISOString(),
+    signals,
+    launchpad: normalizeLaunchpadIconKeyFromSource(source) ?? launchpadFilter,
+    priceChange24h: typeof priceChange24h === "number" ? priceChange24h : 0,
+    change15m: typeof change15m === "number" ? change15m : undefined,
+    volume5m: typeof volume5m === "number" ? volume5m : undefined,
+    volume15m: typeof volume15m === "number" ? volume15m : undefined,
+    buyCount,
+    sellCount,
+    organicPct,
+    top10HoldingsPct,
+    devHoldingsPct,
+    bondingPct,
+    createdAt,
+    snipersCount,
+    bundlersCount,
+    insidersCount,
+    liquidityDeltaPct,
+    priceChange1m,
+    volume1m,
+    buyers1m,
+    proTradersCount,
+    smartTradersCount,
+    freshTradersCount,
+  }
+
+  const momentumState = classifyMomentumRadar(mappedBase)
+  const confidenceScore = computeConfidenceScore(item, mappedBase)
+  const riskLevel = classifyRiskLevel(mappedBase)
+  const tradeModeFit = classifyTradeModeFit(mappedBase)
+  const tradeDecision = decideTradeAction({ confidenceScore, riskLevel, momentumState })
+  const spikeProbability = computeSpikeProbabilityProxy(mappedBase)
+
+  return {
+    ...mappedBase,
+    confidenceScore,
+    momentumState,
+    riskLevel,
+    tradeModeFit,
+    tradeDecision,
+    spikeProbability,
+  }
+}
+
+const mockKOLCalls: KOLCall[] = [
+  {
+    id: "kol_001",
+    kolName: "Crypto Alpha",
+    kolHandle: "@cryptoalpha",
+    kolAvatar: "/placeholder.svg?height=48&width=48",
+    kolFollowers: 125000,
+    kolVerified: true,
+    token: {
+      address: "0xa1b2c3d4e5f6",
+      name: "PepeMax",
+      symbol: "PMAX",
+      logo: "/pepe-frog-crypto-logo.jpg",
+      price: 0.00042,
+      change5m: 24.5,
+      mc: 850000,
+    },
+    postContent:
+      "🚀 Just discovered $PMAX - strong fundamentals and growing community. This could be the next 100x gem! DYOR but I'm bullish AF. #Solana #DeFi",
+    postUrl: "https://twitter.com/cryptoalpha/status/123456",
+    postTime: new Date(Date.now() - 15 * 60000).toISOString(),
+    engagement: {
+      likes: 523,
+      retweets: 187,
+      replies: 94,
+    },
+  },
+  {
+    id: "kol_002",
+    kolName: "SOL Whale",
+    kolHandle: "@solwhale",
+    kolAvatar: "/placeholder.svg?height=48&width=48",
+    kolFollowers: 89000,
+    kolVerified: true,
+    token: {
+      address: "0x1a2b3c4d5e6f",
+      name: "ElonDoge",
+      symbol: "EDOGE",
+      logo: "/doge-rocket-crypto-logo.jpg",
+      price: 0.0089,
+      change5m: 145.8,
+      mc: 5600000,
+    },
+    postContent:
+      "$EDOGE is absolutely mooning right now! +145% in 5 minutes. Team just delivered on roadmap. This is NOT financial advice but... 🌙",
+    postUrl: "https://twitter.com/solwhale/status/123457",
+    postTime: new Date(Date.now() - 5 * 60000).toISOString(),
+    engagement: {
+      likes: 892,
+      retweets: 341,
+      replies: 156,
+    },
+  },
+  {
+    id: "kol_003",
+    kolName: "DeFi Hunter",
+    kolHandle: "@defihunter",
+    kolAvatar: "/placeholder.svg?height=48&width=48",
+    kolFollowers: 210000,
+    kolVerified: true,
+    token: {
+      address: "0x7e6d5c4b3a2f",
+      name: "BullRun",
+      symbol: "BULL",
+      logo: "/bull-charge-crypto-logo.jpg",
+      price: 0.0892,
+      change5m: 167.4,
+      mc: 8200000,
+    },
+    postContent:
+      "Thread 🧵 on why $BULL is my top pick for this cycle:\n\n1. Strong dev team\n2. Innovative tokenomics\n3. Growing ecosystem\n4. Early entry opportunity\n\nNFA, DYOR. LFG! 🔥",
+    postUrl: "https://twitter.com/defihunter/status/123458",
+    postTime: new Date(Date.now() - 25 * 60000).toISOString(),
+    engagement: {
+      likes: 1247,
+      retweets: 498,
+      replies: 203,
+    },
+  },
+]
 
 const mockPrelaunchProjects: PrelaunchProject[] = [
   {
@@ -79,19 +861,24 @@ const mockPrelaunchProjects: PrelaunchProject[] = [
   },
 ]
 
-export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQuery, onTokenClick, isLoading }: TokenTableProps) {
+export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQuery, onTokenClick }: TokenTableProps) {
   const router = useRouter()
-  const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<string>("new")
   const [launchpadFilter, setLaunchpadFilter] = useState<string>("pumpfun")
   const [boostFilter, setBoostFilter] = useState<string>("all")
+  const [activePreset, setActivePreset] = useState<PresetKey | undefined>(undefined)
+  const [mobulaTokens, setMobulaTokens] = useState<TokenRowRuntime[]>([])
+  const [mobulaRateLimited, setMobulaRateLimited] = useState(false)
+  const [mobulaFetchStatus, setMobulaFetchStatus] = useState<"idle" | "loading" | "ready" | "error" | "rate_limited">("idle")
+  const [mobulaLastMappedCount, setMobulaLastMappedCount] = useState<number | null>(null)
+  const [mobulaRefreshTick, setMobulaRefreshTick] = useState(0)
+  const [newTabHiddenDetails, setNewTabHiddenDetails] = useState<Record<string, boolean>>({})
+  const [newTabDetailsDrawerToken, setNewTabDetailsDrawerToken] = useState<TokenRowRuntime | null>(null)
+  const mobulaIntervalRef = useRef<number | null>(null)
+  const mobulaInitialLoadedRef = useRef(false)
   const [ctoTokens, setCtoTokens] = useState<TokenRow[]>([])
   const [loadingCTO, setLoadingCTO] = useState(false)
   const [ctoRateLimited, setCtoRateLimited] = useState(false)
-  const [dexpaidTokens, setDexpaidTokens] = useState<TokenRow[]>([])
-  const [boostTokens, setBoostTokens] = useState<TokenRow[]>([])
-  const [loadingDexpaid, setLoadingDexpaid] = useState(false)
-  const [loadingBoost, setLoadingBoost] = useState(false)
   const [showPrelaunchForm, setShowPrelaunchForm] = useState(false)
   const [prelaunchForm, setPrelaunchForm] = useState({
     tokenName: "",
@@ -101,6 +888,19 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     description: "",
     launchDate: "",
   })
+
+  const launchpadIcons: Record<string, string> = {
+    pumpfun: "/images/pumpfun.png",
+    bags: "/images/bags.png",
+    heaven: "/images/heven.png",
+    bonk: "/images/bonk.png",
+    boop: "/images/boop.png",
+    moonit: "/images/moonit.png",
+    belive: "/images/belive.png",
+    raydium: "/images/jup.png",
+    orca: "/images/orca.png",
+    meteora: "/images/meteora.png",
+  }
 
   const [trackingData, setTrackingData] = useState<Record<string, { copyCount: number; snipeCount: number }>>(() => {
     if (typeof window !== "undefined") {
@@ -128,40 +928,191 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   }, [trackingData])
 
   useEffect(() => {
-    if (activeTab !== "cto") return
-  }, [activeTab])
+    if (activeTab === "cto") {
+      let isInitialLoad = true
+
+      const loadCTO = async () => {
+        if (ctoRateLimited) {
+          console.log("[v0] Skipping CTO fetch - rate limited")
+          return
+        }
+
+        console.log("[v0] Loading CTO tokens...")
+        if (isInitialLoad) {
+          setLoadingCTO(true)
+        }
+        try {
+          const tokens = await fetchCTOTokens()
+          console.log("[v0] Loaded CTO tokens:", tokens.length)
+
+          if ((tokens as any).rateLimit) {
+            console.log("[v0] CTO API is rate limited")
+            setCtoRateLimited(true)
+            setTimeout(
+              () => {
+                console.log("[v0] Resetting CTO rate limit status")
+                setCtoRateLimited(false)
+              },
+              5 * 60 * 1000,
+            )
+            return
+          }
+
+          const now = new Date()
+          const tokensWithTime = tokens.map((token) => {
+            // If token already seen, preserve its original timestamp
+            const existingToken = ctoTokensWithTime.find((t) => t.address === token.address)
+            if (existingToken) {
+              return existingToken
+            }
+
+            // New token - add discovery timestamp
+            if (!seenCTOTokens.current.has(token.address)) {
+              seenCTOTokens.current.add(token.address)
+              return {
+                ...token,
+                timestamp: now.toISOString(),
+                updated: now.toISOString(),
+              }
+            }
+
+            return token
+          })
+
+          setCtoTokensWithTime(tokensWithTime)
+          setCtoTokens(tokensWithTime)
+        } catch (error) {
+          console.error("[v0] Error loading CTO tokens:", error)
+        } finally {
+          if (isInitialLoad) {
+            setLoadingCTO(false)
+            isInitialLoad = false
+          }
+        }
+      }
+
+      loadCTO() // Initial load
+
+      // Poll every 10 seconds for new CTO data
+      const interval = setInterval(loadCTO, 10000)
+      return () => clearInterval(interval)
+    }
+  }, [activeTab, ctoTokensWithTime, ctoRateLimited])
 
   useEffect(() => {
-    if (activeTab !== "dexpaid") return
-    let cancelled = false
-    setLoadingDexpaid(true)
-    fetchDexPaidTokens()
-      .then((tokens) => {
-        if (!cancelled) setDexpaidTokens(tokens)
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingDexpaid(false)
-      })
-    return () => {
-      cancelled = true
+    if (activeTab !== "new") {
+      if (mobulaIntervalRef.current) {
+        window.clearInterval(mobulaIntervalRef.current)
+        mobulaIntervalRef.current = null
+      }
+      setMobulaFetchStatus("idle")
+      setMobulaLastMappedCount(null)
+      return
     }
-  }, [activeTab])
 
-  useEffect(() => {
-    if (activeTab !== "boost") return
-    let cancelled = false
-    setLoadingBoost(true)
-    fetchBoostTokens()
-      .then((tokens) => {
-        if (!cancelled) setBoostTokens(tokens)
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingBoost(false)
-      })
-    return () => {
-      cancelled = true
+    const fetchMobulaPulse = async (isInitial: boolean) => {
+      try {
+        if (isInitial) {
+          setMobulaFetchStatus("loading")
+          setMobulaLastMappedCount(null)
+        }
+
+        const params = new URLSearchParams({
+          assetMode: "true",
+          chainId: "solana:solana",
+        })
+
+        let requestedPoolTypes: string | undefined = undefined
+
+        if (launchpadFilter !== "all") {
+          const poolTypes =
+            launchpadFilter === "meteora"
+              ? "meteora-dyn2"
+              : launchpadFilter === "raydium"
+                ? "raydium-launchlab"
+                : launchpadFilter
+          params.set("poolTypes", poolTypes)
+          requestedPoolTypes = poolTypes
+        }
+        const url = `/api/mobula-pulse?${params.toString()}`
+        const res = await fetch(url, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+          },
+          cache: "no-store",
+        })
+
+        const json = await res.json().catch(() => null)
+
+        if (!res.ok) {
+          if (res.status === 429 || json?.statusCode === 429) {
+            setMobulaRateLimited(true)
+            if (isInitial) setMobulaFetchStatus("rate_limited")
+          } else {
+            if (isInitial) setMobulaFetchStatus("error")
+          }
+          return
+        }
+
+        if (json?.statusCode === 429) {
+          setMobulaRateLimited(true)
+          if (isInitial) setMobulaFetchStatus("rate_limited")
+          return
+        }
+
+        setMobulaRateLimited(false)
+        const items: any[] =
+          (Array.isArray(json?.new?.data) ? json.new.data : null) ??
+          (Array.isArray(json) ? json : null) ??
+          (Array.isArray(json?.data) ? json.data : null) ??
+          (Array.isArray(json?.data?.assets) ? json.data.assets : null) ??
+          (Array.isArray(json?.data?.result) ? json.data.result : null) ??
+          (Array.isArray(json?.result) ? json.result : [])
+
+        if (!Array.isArray(items)) {
+          if (isInitial) setMobulaFetchStatus("error")
+          return
+        }
+
+        const mapped = items
+          .map((it) => mapMobulaPulseItemToTokenRow(it, launchpadFilter, requestedPoolTypes))
+          .filter(Boolean) as TokenRowRuntime[]
+
+        if (isInitial) {
+          setMobulaFetchStatus("ready")
+          setMobulaLastMappedCount(mapped.length)
+        }
+
+        if (mapped.length > 0) {
+          setMobulaTokens(mapped)
+          mobulaInitialLoadedRef.current = true
+        } else if (isInitial && !mobulaInitialLoadedRef.current) {
+          setMobulaTokens([])
+        }
+      } catch {
+        // no-op (defensive)
+        if (isInitial) setMobulaFetchStatus("error")
+      }
     }
-  }, [activeTab])
+
+    if (mobulaIntervalRef.current) {
+      window.clearInterval(mobulaIntervalRef.current)
+      mobulaIntervalRef.current = null
+    }
+
+    fetchMobulaPulse(true)
+    mobulaIntervalRef.current = window.setInterval(() => {
+      fetchMobulaPulse(false)
+    }, 10000)
+
+    return () => {
+      if (mobulaIntervalRef.current) {
+        window.clearInterval(mobulaIntervalRef.current)
+        mobulaIntervalRef.current = null
+      }
+    }
+  }, [activeTab, launchpadFilter, mobulaRefreshTick])
 
   const handleCopyWallet = (wallet: string) => {
     navigator.clipboard.writeText(wallet)
@@ -203,17 +1154,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     return `${Math.floor(hours / 24)}d ago`
   }
 
-  const formatCreator = (creator: string) => {
-    if (!creator || creator.length <= 10) return creator
-    return `${creator.slice(0, 5)}...${creator.slice(-5)}`
-  }
-
-  const formatMint = (mint: string) => {
-    if (!mint || mint.length <= 8) return mint
-    return `${mint.slice(0, 3)}...${mint.slice(-5)}`
-  }
-
-  const openBuyLink = (platform: string, address: string, e: React.MouseEvent) => {
+  const openBuyLink = (platform: string, address: string, e: MouseEvent) => {
     e.stopPropagation()
     const links: Record<string, string> = {
       trojan: `https://t.me/solana_trojanbot?start=${address}`,
@@ -225,21 +1166,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   }
 
   const handleTokenClick = (token: TokenRow) => {
-    console.log("[v0] Token clicked:", {
-      address: token.address,
-      mint: token.mint,
-      creator: token.creator,
-      name: token.name,
-      symbol: token.symbol,
-      fullData: token
-    })
-    
-    // Store with both address and mint as keys to handle both cases
     localStorage.setItem(`token_${token.address}`, JSON.stringify(token))
-    if (token.mint && token.mint !== token.address) {
-      localStorage.setItem(`token_${token.mint}`, JSON.stringify(token))
-    }
-    
     if (onTokenClick) {
       onTokenClick(token)
     } else {
@@ -252,44 +1179,239 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     setIsPrelaunchModalOpen(true)
   }
 
-  const filteredTokens = (() => {
+  const renderNewTabDexpathDetail = (runtime: TokenRowRuntime) => {
+    return (
+      <>
+        {typeof runtime.bondingPct === "number" && (
+          <div className="mt-1" aria-label="Bonding progress">
+            <div className="flex items-center justify-between text-[9px] sm:text-[10px] text-muted-foreground">
+              <span className="text-yellow-600" title="Bonding progress">
+                🟡 Bonding {runtime.bondingPct?.toFixed(0)}%
+              </span>
+              {typeof runtime.spikeProbability === "number" ? (
+                <span
+                  className={`text-[8px] sm:text-[9px] ${getSpikeBand(runtime.spikeProbability ?? 0).tone}`}
+                  title="Interpretation band for Often Spike %"
+                >
+                  {getSpikeBand(runtime.spikeProbability ?? 0).label}
+                </span>
+              ) : (
+                <span className="text-[8px] sm:text-[9px]" title="Bonding progress">
+                  Bonding progress
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 h-1.5 w-full rounded-full bg-secondary/60 overflow-hidden" title="Bonding progress">
+              <div className="h-full bg-primary" style={{ width: `${clampNumber(runtime.bondingPct ?? 0, 0, 100)}%` }} />
+            </div>
+          </div>
+        )}
+
+        {(typeof runtime.snipersCount === "number" ||
+          typeof runtime.bundlersCount === "number" ||
+          typeof runtime.insidersCount === "number" ||
+          typeof runtime.liquidityDeltaPct === "number" ||
+          typeof runtime.proTradersCount === "number" ||
+          typeof runtime.smartTradersCount === "number" ||
+          typeof runtime.freshTradersCount === "number") && (
+          <div className="mt-1 flex flex-wrap gap-3 text-[9px] sm:text-[10px] text-muted-foreground">
+            {typeof runtime.snipersCount === "number" && (
+              <span className="inline-flex items-center gap-1" title={`Snipers: ${runtime.snipersCount}`}>
+                {runtime.snipersCount === 0 ? (
+                  <CheckCircle2 className="h-3 w-3 text-green-600" />
+                ) : (
+                  <XCircle className="h-3 w-3 text-red-600" />
+                )}
+                Snipers {runtime.snipersCount}
+              </span>
+            )}
+            {typeof runtime.bundlersCount === "number" && (
+              <span className="inline-flex items-center gap-1" title={`Bundlers: ${runtime.bundlersCount}`}>
+                {runtime.bundlersCount === 0 ? (
+                  <CheckCircle2 className="h-3 w-3 text-green-600" />
+                ) : (
+                  <XCircle className="h-3 w-3 text-red-600" />
+                )}
+                Bundlers {runtime.bundlersCount}
+              </span>
+            )}
+            {typeof runtime.insidersCount === "number" && (
+              <span className="inline-flex items-center gap-1" title={`Insiders: ${runtime.insidersCount}`}>
+                {runtime.insidersCount === 0 ? (
+                  <CheckCircle2 className="h-3 w-3 text-green-600" />
+                ) : (
+                  <XCircle className="h-3 w-3 text-red-600" />
+                )}
+                Insiders {runtime.insidersCount}
+              </span>
+            )}
+            {typeof runtime.liquidityDeltaPct === "number" && (
+              <span className="inline-flex items-center gap-1" title={`Liquidity delta: ${runtime.liquidityDeltaPct?.toFixed(0)}%`}>
+                {(runtime.liquidityDeltaPct ?? 0) >= -20 ? (
+                  <CheckCircle2 className="h-3 w-3 text-green-600" />
+                ) : (
+                  <AlertTriangle className="h-3 w-3 text-yellow-600" />
+                )}
+                LP
+              </span>
+            )}
+            {typeof runtime.smartTradersCount === "number" && (
+              <span title={`Smart traders: ${runtime.smartTradersCount}`}>
+                🧠 Smart {(runtime.smartTradersCount ?? 0) > 0 ? "✅" : "❌"}
+              </span>
+            )}
+            {typeof runtime.proTradersCount === "number" && (
+              <span title={`Pro traders: ${runtime.proTradersCount}`}>
+                🐳 Pro {(runtime.proTradersCount ?? 0) > 0 ? `✅ ${runtime.proTradersCount}` : "❌"}
+              </span>
+            )}
+            {typeof runtime.freshTradersCount === "number" && (
+              <span title={`Fresh wallets: ${runtime.freshTradersCount}`}>
+                🆕 Fresh {(runtime.freshTradersCount ?? 0) > 0 ? `✅ ${runtime.freshTradersCount}` : "⚠️ 0"}
+              </span>
+            )}
+          </div>
+        )}
+
+        {(() => {
+          const createdOrUpdatedIso = runtime.createdAt ?? runtime.updatedAt
+          const createdOrUpdatedMs = createdOrUpdatedIso ? Date.parse(createdOrUpdatedIso) : Number.NaN
+          const tokenAgeMinutes = Number.isFinite(createdOrUpdatedMs) ? (Date.now() - createdOrUpdatedMs) / 60000 : undefined
+
+          if (!(typeof tokenAgeMinutes === "number" && tokenAgeMinutes >= 0 && tokenAgeMinutes <= 5)) return null
+
+          const summary = generateTokenSummary({
+            priceChange1m: runtime.priceChange1m,
+            priceChange5m: runtime.priceChange5m,
+            volume1m: runtime.volume1m,
+            volume5m: runtime.volume5m,
+            liquidity: runtime.liquidity,
+            marketCap: runtime.mc,
+            spikeProbability: runtime.spikeProbability,
+            confidenceScore: runtime.confidenceScore,
+            tokenAgeMinutes,
+          })
+
+          const modeClass =
+            summary.mode === "SNIPER"
+              ? "bg-green-500/15 text-green-600 border-green-500/30"
+              : summary.mode === "SCALPER"
+                ? "bg-yellow-500/15 text-yellow-700 border-yellow-500/30"
+                : "bg-muted text-muted-foreground border-border"
+
+          const confidenceClass =
+            summary.confidence === "HIGH"
+              ? "bg-green-500/15 text-green-600 border-green-500/30"
+              : summary.confidence === "MEDIUM"
+                ? "bg-yellow-500/15 text-yellow-700 border-yellow-500/30"
+                : "bg-red-500/15 text-red-600 border-red-500/30"
+
+          return (
+            <div className="mt-2 rounded-md border border-border bg-secondary/20 px-2 py-1.5 text-[9px] sm:text-[10px]">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-foreground">Summary</span>
+                <span className={`inline-flex items-center rounded border px-1.5 py-0 h-4 leading-none ${modeClass}`}>{summary.mode}</span>
+                <span className={`inline-flex items-center rounded border px-1.5 py-0 h-4 leading-none ${confidenceClass}`}>{summary.confidence}</span>
+                <span className="text-muted-foreground">·</span>
+                <span className="text-foreground/90">{summary.verdict}</span>
+              </div>
+
+              {summary.momentum.length > 0 && (
+                <div className="mt-1 text-muted-foreground">
+                  <span className="text-foreground/80">Momentum:</span> {summary.momentum.join(" • ")}
+                </div>
+              )}
+
+              {summary.risks.length > 0 && (
+                <div className="mt-0.5 text-muted-foreground">
+                  <span className="text-foreground/80">Risks:</span> {summary.risks.join(" • ")}
+                </div>
+              )}
+            </div>
+          )
+        })()}
+      </>
+    )
+  }
+
+  const filteredTokens = initialTokens.filter((token) => {
     if (activeTab === "new") {
-      return initialTokens.filter((token) => {
-        if (launchpadFilter === "all") return true
-        return token.launchpad === launchpadFilter
-      })
+      if (launchpadFilter === "all") return true
+      return token.launchpad === launchpadFilter
     }
-    if (activeTab === "dexpaid") {
-      return dexpaidTokens
-    }
+
     if (activeTab === "boost") {
-      if (boostFilter === "all") return boostTokens
-      const minBoost: Record<string, number> = {
-        "10x": 10,
-        "30x": 30,
-        "50x": 50,
-        "100x": 100,
-        "500x": 500,
-      }
-      const min = minBoost[boostFilter]
-      if (min == null) return boostTokens
-      return boostTokens.filter((t) => (t.boostCount ?? 0) >= min)
+      // This filter logic needs to be defined based on how boostFilter is used
+      // For now, assuming it might filter based on a 'boostLevel' or similar property on TokenRow
+      // Example: return token.boostLevel === boostFilter;
+      return true // Placeholder
     }
+
     if (activeTab === "cto") {
-      return ctoTokens
+      return ctoTokens.some((ct) => ct.address === token.address)
     }
-    if (activeTab === "signals") {
-      const byAddress = new Map<string, TokenRow>()
-      ;[...dexpaidTokens, ...boostTokens, ...ctoTokens].forEach((t) => byAddress.set(t.address, t))
-      return Array.from(byAddress.values())
+
+    // Add other tab filtering logic here if necessary
+    return true // Default to showing all if no specific filter matches
+  })
+
+  const newTabEffectiveTokens = useMemo(() => {
+    if (activeTab !== "new") return filteredTokens as TokenRowRuntime[]
+
+    const source = mobulaTokens as TokenRowRuntime[]
+
+    const filtered = source.filter((token) => {
+      if (launchpadFilter === "all") return true
+      return token.launchpad === launchpadFilter
+    })
+
+    if (!activePreset) return filtered
+
+    const sorted = [...filtered]
+    if (activePreset === "top_traded") {
+      sorted.sort((a, b) => (b.volume24h ?? 0) - (a.volume24h ?? 0))
+    } else if (activePreset === "gainers") {
+      sorted.sort((a, b) => ((b.priceChange1m ?? b.change5m) ?? 0) - ((a.priceChange1m ?? a.change5m) ?? 0))
+    } else if (activePreset === "losers") {
+      sorted.sort((a, b) => ((a.priceChange1m ?? a.change5m) ?? 0) - ((b.priceChange1m ?? b.change5m) ?? 0))
     }
-    return initialTokens
-  })()
+    return sorted
+  }, [activeTab, activePreset, launchpadFilter, mobulaTokens, initialTokens, filteredTokens])
+
+  const newTabScrollRef = useRef<HTMLDivElement | null>(null)
+  const [newTabScrollTop, setNewTabScrollTop] = useState(0)
+  const NEW_TAB_CONTAINER_HEIGHT = 600
+  const NEW_TAB_ROW_HEIGHT = 96
+
+  const shouldVirtualizeNewTab = activeTab === "new" && newTabEffectiveTokens.length > 100
+
+  const effectiveFilteredTokensLength = activeTab === "new" ? newTabEffectiveTokens.length : filteredTokens.length
+
+  const newTabWindowed = useMemo(() => {
+    if (!shouldVirtualizeNewTab) {
+      return {
+        topPad: 0,
+        bottomPad: 0,
+        visible: newTabEffectiveTokens,
+      }
+    }
+
+    const total = newTabEffectiveTokens.length
+    const overscan = 10
+    const startIndex = clampNumber(Math.floor(newTabScrollTop / NEW_TAB_ROW_HEIGHT) - overscan, 0, total)
+    const visibleCount = Math.ceil(NEW_TAB_CONTAINER_HEIGHT / NEW_TAB_ROW_HEIGHT) + overscan * 2
+    const endIndex = clampNumber(startIndex + visibleCount, 0, total)
+
+    const topPad = startIndex * NEW_TAB_ROW_HEIGHT
+    const bottomPad = (total - endIndex) * NEW_TAB_ROW_HEIGHT
+    const visible = newTabEffectiveTokens.slice(startIndex, endIndex)
+    return { topPad, bottomPad, visible }
+  }, [shouldVirtualizeNewTab, newTabEffectiveTokens, newTabScrollTop])
 
   return (
     <Card>
       <CardHeader className="pb-px">
-        {/* Reordered tabs: New Coins, New Dexpaid, New Boost, CTO, New Ads, Signals, Prelaunch */}
+        {/* Reordered tabs: New Coins, New Dexpaid, New Boost, CTO, New Ads, Signals, KOL, Prelaunch */}
         <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-1.5 sm:gap-2">
           <Button
             variant={activeTab === "new" ? "default" : "outline"}
@@ -340,6 +1462,14 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
             Signals
           </Button>
           <Button
+            variant={activeTab === "kol" ? "default" : "outline"}
+            size="sm"
+            className="text-[10px] sm:text-xs py-1 h-7 sm:h-8"
+            onClick={() => setActiveTab("kol")}
+          >
+            KOL
+          </Button>
+          <Button
             variant={activeTab === "prelaunch" ? "default" : "outline"}
             size="sm"
             className="text-[10px] sm:text-xs py-1 h-7 sm:h-8 flex items-center gap-1"
@@ -355,6 +1485,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
         {(activeTab === "new" ||
           activeTab === "dexpaid" ||
           activeTab === "boost" ||
+          activeTab === "cto" ||
           activeTab === "ads" ||
           activeTab === "signals") && (
           <div className={activeTab === "boost" ? "mt-2 flex justify-between items-center" : "mt-2 flex justify-end"}>
@@ -374,46 +1505,35 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                 ))}
               </div>
             )}
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button
-                    size="sm"
-                    className="bg-primary hover:bg-primary/90 text-black font-semibold text-xs h-8"
-                  >
-                    <Target className="h-3 w-3 mr-1" />
-                    Snipe{" "}
-                    {activeTab === "new"
-                      ? "New Coins"
-                      : activeTab === "dexpaid"
-                        ? "New Dexpaid"
-                        : activeTab === "boost"
-                          ? "New Boost"
-                          : activeTab === "cto"
-                            ? "CTO"
-                            : activeTab === "ads"
-                              ? "New Ads"
-                              : "Signals"}
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Coming Soon</DialogTitle>
-                    <DialogDescription>
-                      Snipe {(() => {
-                        const tabNames: Record<string, string> = {
-                          new: "New Coins",
-                          dexpaid: "New Dexpaid",
-                          boost: "New Boost",
-                          cto: "CTO",
-                          ads: "New Ads",
-                          signals: "Signals",
-                        };
-                        return tabNames[activeTab] || "Feature";
-                      })()} - Feature coming soon!
-                    </DialogDescription>
-                  </DialogHeader>
-                </DialogContent>
-              </Dialog>
+            <Button
+              size="sm"
+              className="bg-primary hover:bg-primary/90 text-black font-semibold text-xs h-8"
+              onClick={() => {
+                const tabNames: Record<string, string> = {
+                  new: "New Coins",
+                  dexpaid: "New Dexpaid",
+                  boost: "New Boost",
+                  cto: "CTO",
+                  ads: "New Ads",
+                  signals: "Signals",
+                }
+                alert(`Snipe ${tabNames[activeTab]} - Feature coming soon!`)
+              }}
+            >
+              <Target className="h-3 w-3 mr-1" />
+              Snipe{" "}
+              {activeTab === "new"
+                ? "New Coins"
+                : activeTab === "dexpaid"
+                  ? "New Dexpaid"
+                  : activeTab === "boost"
+                    ? "New Boost"
+                    : activeTab === "cto"
+                      ? "CTO"
+                      : activeTab === "ads"
+                        ? "New Ads"
+                        : "Signals"}
+            </Button>
           </div>
         )}
 
@@ -422,19 +1542,6 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
           <div className="flex flex-wrap gap-2 mt-2">
             {["all", "pumpfun", "bags", "heaven", "bonk", "boop", "moonit", "belive", "raydium", "orca", "meteora"].map(
               (filter) => {
-                const launchpadIcons: Record<string, string> = {
-                  pumpfun: "/images/pumpfun.png",
-                  bags: "/images/bags.png",
-                  heaven: "/images/heven.png",
-                  bonk: "/images/bonk.png",
-                  boop: "/images/boop.png",
-                  moonit: "/images/moonit.png",
-                  belive: "/images/belive.png",
-                  raydium: "/images/jup.png",
-                  orca: "/images/orca.png",
-                  meteora: "/images/meteora.png",
-                }
-
                 return (
                   <Badge
                     key={filter}
@@ -444,7 +1551,14 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                         ? "bg-primary text-primary-foreground hover:bg-primary/90"
                         : "hover:bg-secondary"
                     }`}
-                    onClick={() => setLaunchpadFilter(filter)}
+                    onClick={() => {
+                      if (filter === launchpadFilter) {
+                        // Re-click should refresh Mobula fetch (New Coins only)
+                        setMobulaRefreshTick((t) => t + 1)
+                        return
+                      }
+                      setLaunchpadFilter(filter)
+                    }}
                   >
                     <div className="flex items-center gap-1.5">
                       {launchpadIcons[filter] && (
@@ -465,11 +1579,136 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
           </div>
         )}
 
+        {/* Preset toggle (New Coins only) */}
+        {activeTab === "new" && (
+          <div className="mt-2 overflow-x-auto">
+            <div className="flex gap-2 min-w-max">
+              <Button
+                type="button"
+                size="sm"
+                variant={activePreset === "top_traded" ? "default" : "outline"}
+                className="h-9 sm:h-8 text-xs px-3 whitespace-nowrap"
+                onClick={() => setActivePreset((prev) => (prev === "top_traded" ? undefined : "top_traded"))}
+                aria-label="Toggle Volume preset"
+              >
+                💰 Volume
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={activePreset === "gainers" ? "default" : "outline"}
+                className="h-9 sm:h-8 text-xs px-3 whitespace-nowrap"
+                onClick={() => setActivePreset((prev) => (prev === "gainers" ? undefined : "gainers"))}
+                aria-label="Toggle Gainers preset"
+              >
+                📈 Gainers
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={activePreset === "losers" ? "default" : "outline"}
+                className="h-9 sm:h-8 text-xs px-3 whitespace-nowrap"
+                onClick={() => setActivePreset((prev) => (prev === "losers" ? undefined : "losers"))}
+                aria-label="Toggle Losers preset"
+              >
+                📉 Losers
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* New Boost filter tabs */}
         {activeTab === "boost" && <></>}
       </CardHeader>
       <CardContent className="p-0">
-        {activeTab === "prelaunch" ? (
+        {activeTab === "kol" ? (
+          <div className="overflow-y-auto h-[600px] px-3 space-y-2 py-3">
+            {mockKOLCalls.map((call) => (
+              <div
+                key={call.id}
+                className="p-3 rounded-lg bg-secondary/30 hover:bg-secondary/50 border border-border transition-colors"
+              >
+                {/* Influencer & Token Header */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Image
+                      src={call.kolAvatar || "/placeholder.svg"}
+                      alt={call.kolName}
+                      width={32}
+                      height={32}
+                      className="rounded-full"
+                    />
+                    <div>
+                      <div className="flex items-center gap-1">
+                        <span className="font-semibold text-xs sm:text-sm">{call.kolName}</span>
+                        {call.kolVerified && <CheckCircle2 className="h-3 w-3 text-primary" />}
+                      </div>
+                      <p className="text-[10px] sm:text-sm text-muted-foreground">
+                        {call.kolHandle} · {formatNumber(call.kolFollowers)} followers
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Image
+                      src={call.token.logo || "/placeholder.svg"}
+                      alt={call.token.symbol}
+                      width={24}
+                      height={24}
+                      className="rounded-full"
+                    />
+                    <span className="font-semibold text-xs sm:text-sm">${call.token.symbol}</span>
+                  </div>
+                </div>
+
+                {/* Post Content */}
+                <p className="text-xs sm:text-sm text-foreground/90 mb-2 line-clamp-2">{call.postContent}</p>
+
+                {/* Token Info & Engagement */}
+                <div className="flex items-center justify-between text-[10px] sm:text-sm text-muted-foreground">
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono">${formatPrice(call.token.price)}</span>
+                    <span className={`font-semibold ${call.token.change5m >= 0 ? "text-green-500" : "text-red-500"}`}>
+                      {call.token.change5m >= 0 ? "+" : ""}
+                      {call.token.change5m.toFixed(1)}%
+                    </span>
+                    <span>MC: {formatMarketCap(call.token.mc)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="flex items-center gap-0.5">
+                      <Heart className="h-3 w-3" /> {formatNumber(call.engagement.likes)}
+                    </span>
+                    <span className="flex items-center gap-0.5">
+                      <Repeat2 className="h-3 w-3" /> {formatNumber(call.engagement.retweets)}
+                    </span>
+                    <span className="flex items-center gap-0.5">
+                      <MessageCircle className="h-3 w-3" /> {formatNumber(call.engagement.replies)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-2 mt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 h-7 text-[10px] sm:text-sm bg-transparent"
+                    onClick={() => window.open(call.postUrl, "_blank")}
+                  >
+                    View Post
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="flex-1 h-7 text-[10px] sm:text-sm"
+                    onClick={() => (window.location.href = `/token/${call.token.address}`)}
+                  >
+                    Token Details
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : activeTab === "prelaunch" ? (
           <>
             <div className="flex justify-end px-4 py-2 border-b border-border">
               <Dialog open={showPrelaunchForm} onOpenChange={setShowPrelaunchForm}>
@@ -596,28 +1835,29 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                 </DialogContent>
               </Dialog>
             </div>
-            <Table wrapperClassName="h-[600px] overflow-auto overflow-x-auto">
-              <TableHeader className="shadow-sm">
+            <div className="h-[600px] overflow-auto">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
                   <TableRow className="hover:bg-transparent border-border">
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                       Token
                     </TableHead>
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                       Dev Name
                     </TableHead>
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                       Dev Wallet
                     </TableHead>
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                       Description
                     </TableHead>
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                       Interest
                     </TableHead>
-                    <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                       Launch
                     </TableHead>
-                    <TableHead className="font-semibold text-foreground text-center text-[10px] sm:text-xs bg-background px-4">
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-center text-[10px] sm:text-xs bg-background px-4">
                       Action
                     </TableHead>
                   </TableRow>
@@ -653,7 +1893,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                                 handleCopyWallet(project.devWallet)
                               }}
                             >
-                              <Copy className="h-1 w-1" />
+                              <Copy className="h-1.5 w-1.5" />
                             </Button>
                           </div>
                         </TableCell>
@@ -663,7 +1903,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                         <TableCell className="text-center py-2 px-4">
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center justify-center gap-1 text-[9px] sm:text-xs text-muted-foreground">
-                              <Copy className="h-1.5 w-1.5" />
+                              <Copy className="h-2 w-2" />
                               <span>{tracking.copyCount}</span>
                             </div>
                             <div className="flex items-center justify-center gap-1 text-[9px] sm:text-xs text-amber-500">
@@ -700,283 +1940,673 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                   })}
                 </TableBody>
               </Table>
+            </div>
           </>
         ) : activeTab === "cto" ? (
-          <div className="flex flex-col items-center justify-center h-[600px] space-y-4">
-            <Construction className="h-16 w-16 text-muted-foreground/50" />
-            <div className="text-center space-y-2">
-              <h3 className="text-xl font-semibold text-foreground">Coming Soon</h3>
-              <p className="text-muted-foreground max-w-md">
-                CTO (Community Takeover) signals are under development. Check back soon!
-              </p>
+          loadingCTO ? (
+            <div className="max-h-[600px] overflow-auto">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
+                  <TableRow className="hover:bg-transparent border-border">
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Token</TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">MC</TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Price</TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">5m</TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Vol(24h)</TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Signals</TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Updated</TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-center text-[10px] sm:text-xs bg-background px-4">Buy</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <TableRow key={`cto-skel-${i}`} className="border-border">
+                      <TableCell className="py-2 px-4">
+                        <div className="flex items-center gap-2">
+                          <Skeleton className="h-6 w-6 rounded-full" />
+                          <div className="flex flex-col gap-1">
+                            <Skeleton className="h-3 w-16" />
+                            <Skeleton className="h-2 w-24" />
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-2 px-4"><Skeleton className="h-3 w-10" /></TableCell>
+                      <TableCell className="py-2 px-4"><Skeleton className="h-3 w-12" /></TableCell>
+                      <TableCell className="py-2 px-4"><Skeleton className="h-3 w-8" /></TableCell>
+                      <TableCell className="py-2 px-4"><Skeleton className="h-3 w-16" /></TableCell>
+                      <TableCell className="py-2 px-4">
+                        <div className="flex gap-1">
+                          <Skeleton className="h-3 w-10" />
+                          <Skeleton className="h-3 w-8" />
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-2 px-4"><Skeleton className="h-3 w-20" /></TableCell>
+                      <TableCell className="py-2 px-4 text-center"><Skeleton className="h-6 w-12 rounded" /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
-          </div>
-        ) : activeTab === "dexpaid" && loadingDexpaid ? (
-          <div className="flex flex-col items-center justify-center h-[600px] space-y-4">
-            <Construction className="h-16 w-16 text-muted-foreground/50 animate-pulse" />
-            <p className="text-sm text-muted-foreground">Loading DexPaid tokens...</p>
-          </div>
-        ) : activeTab === "boost" && loadingBoost ? (
-          <div className="flex flex-col items-center justify-center h-[600px] space-y-4">
-            <Construction className="h-16 w-16 text-muted-foreground/50 animate-pulse" />
-            <p className="text-sm text-muted-foreground">Loading Boost tokens...</p>
-          </div>
-        ) : (activeTab === "dexpaid" || activeTab === "boost" || activeTab === "signals") && filteredTokens.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-[600px] space-y-4">
-            <Construction className="h-16 w-16 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">
-              {activeTab === "dexpaid"
-                ? "No DexPaid tokens right now."
-                : activeTab === "boost"
-                  ? "No Boost tokens right now."
-                  : "No signals data yet. Try DexPaid or Boost tabs."}
-            </p>
-          </div>
+          ) : ctoTokens.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              <Construction className="h-8 w-8 mx-auto mb-2" />
+              No Community Takeovers found
+            </div>
+          ) : ctoRateLimited ? (
+            <div className="flex flex-col items-center justify-center h-[600px] space-y-4">
+              <Construction className="h-16 w-16 text-red-500 animate-pulse" />
+              <div className="text-center space-y-2">
+                <h3 className="text-xl font-semibold text-red-500">Rate Limited</h3>
+                <p className="text-muted-foreground max-w-md">
+                  We've been rate limited by the CTO API. Please try again in a few minutes.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="max-h-[600px] overflow-auto">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
+                  <TableRow className="hover:bg-transparent border-border">
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                      Token
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                      MC
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                      Price
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                      5m
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                      Vol(24h)
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                      Signals
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                      Updated
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-center text-[10px] sm:text-xs bg-background px-4">
+                      Buy
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {ctoTokens.map((token) => (
+                    <TableRow
+                      key={token.address}
+                      className="border-border hover:bg-secondary/50 cursor-pointer"
+                      onClick={() => {
+                        if (onTokenClick) {
+                          onTokenClick(token)
+                        } else {
+                          localStorage.setItem(`token_${token.address}`, JSON.stringify(token))
+                          router.push(`/token/${token.address}`)
+                        }
+                      }}
+                    >
+                      <TableCell className="py-2 px-4">
+                        <div className="flex items-center gap-2">
+                          <Image
+                            src={token.logo || "/placeholder.svg"}
+                            alt={token.symbol}
+                            width={24}
+                            height={24}
+                            className="rounded-full object-cover flex-shrink-0"
+                          />
+                          <div className="flex flex-col">
+                            <span className="font-medium text-[9px] sm:text-[10px] truncate max-w-[120px]">
+                              {token.name}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-muted-foreground text-[8px] sm:text-[9px]">{token.symbol}</span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-auto p-0 hover:bg-transparent"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  navigator.clipboard.writeText(token.address)
+                                }}
+                                title="Copy CA"
+                              >
+                                <Copy className="h-1.5 w-1.5 text-muted-foreground" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-[9px] sm:text-[10px] py-2 px-4">
+                        {formatMarketCap(token.mc)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-[9px] sm:text-[10px] py-2 px-4">
+                        {formatPrice(token.price)}
+                      </TableCell>
+                      <TableCell className="text-right py-2 px-4">
+                        <span
+                          className={`font-semibold text-[9px] sm:text-[10px] ${
+                            token.change5m >= 0 ? "text-green-500" : "text-red-500"
+                          }`}
+                        >
+                          {token.change5m >= 0 ? "+" : ""}
+                          {token.change5m.toFixed(2)}%
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-[9px] sm:text-[10px] py-2 px-4">
+                        ${formatNumber(token.volume24h)}
+                      </TableCell>
+                      <TableCell className="py-2 px-4">
+                        <div className="flex gap-1 flex-wrap">
+                          {token.signals.slice(0, 3).map((signal, index) => (
+                            <SignalBadge key={index} type={signal} boostCount={token.boostCount} />
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-[9px] sm:text-[10px] py-2 px-4">
+                        {new Date(token.updatedAt).toLocaleTimeString()}
+                      </TableCell>
+                      <TableCell className="text-center py-2 px-4">
+                        <div className="flex justify-center gap-1">
+                          {[
+                            { name: "Trojan", img: "/images/trojan.png" },
+                            { name: "Axion", img: "/images/axiom.png" },
+                            { name: "GMGN", img: "/images/gmgn.png" },
+                            { name: "Bonk", img: "/images/bonk.png" },
+                          ].map((platform) => (
+                            <Button
+                              key={platform.name}
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 hover:bg-primary/20"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                window.open(`https://${platform.name.toLowerCase()}.com`, "_blank")
+                              }}
+                              title={`Buy on ${platform.name}`}
+                            >
+                              <Image
+                                src={platform.img || "/placeholder.svg"}
+                                alt={platform.name}
+                                width={16}
+                                height={16}
+                              />
+                            </Button>
+                          ))}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )
         ) : (
           <>
-            {/* Empty states for non-Pumpfun launchpads */}
-            {activeTab === "new" &&
-            launchpadFilter !== "all" &&
-            launchpadFilter !== "pumpfun" &&
-            filteredTokens.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-[600px] space-y-4">
-                <Construction className="h-16 w-16 text-muted-foreground/50" />
-                <div className="text-center space-y-2">
-                  <h3 className="text-xl font-semibold text-foreground">Coming Soon</h3>
-                  <p className="text-muted-foreground max-w-md">
-                    {launchpadFilter.charAt(0).toUpperCase() + launchpadFilter.slice(1)} integration is currently under
-                    development.
-                    <br />
-                    Check back soon for updates!
-                  </p>
-                  <Badge variant="secondary" className="mt-4">
-                    Under Building
-                  </Badge>
+            {effectiveFilteredTokensLength === 0 ? (
+              activeTab === "new" && mobulaFetchStatus === "ready" && !mobulaRateLimited && mobulaLastMappedCount === 0 ? (
+                <div className="h-[600px] overflow-auto p-4">
+                  <Empty className="border-border bg-secondary/20">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <SearchX className="h-6 w-6" />
+                      </EmptyMedia>
+                      <EmptyTitle>No tokens available</EmptyTitle>
+                      <EmptyDescription>
+                        {launchpadFilter === "all"
+                          ? "There are no new tokens available right now."
+                          : "There are no new tokens available for this launchpad right now."}
+                      </EmptyDescription>
+                    </EmptyHeader>
+                    <EmptyContent>
+                      {launchpadFilter !== "all" && (
+                        <div className="text-xs text-muted-foreground">
+                          Selected launchpad: <span className="font-medium text-foreground">{launchpadFilter}</span>
+                        </div>
+                      )}
+                      <div className="text-xs text-muted-foreground">Try a different launchpad or switch to All.</div>
+                    </EmptyContent>
+                  </Empty>
                 </div>
-              </div>
+              ) : (
+                <div className="h-[600px] overflow-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
+                      <TableRow className="hover:bg-transparent border-border">
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Token</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">MC</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Price</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                          {activeTab === "new" ? "1m" : "5m"}
+                        </TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Vol(24h)</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Signals</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Updated</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-center text-[10px] sm:text-xs bg-background px-4">Buy</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <TableRow key={`tab-skel-${i}`} className="border-border">
+                          <TableCell className="py-2 px-4">
+                            <div className="flex items-center gap-2">
+                              <Skeleton className="h-7 w-7 rounded-full" />
+                              <div className="flex flex-col gap-1">
+                                <Skeleton className="h-3 w-24" />
+                                <Skeleton className="h-2 w-16" />
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-12 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-10 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-8 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-16 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4">
+                            <div className="flex gap-1">
+                              <Skeleton className="h-3 w-10" />
+                              <Skeleton className="h-3 w-8" />
+                              <Skeleton className="h-3 w-6" />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2 px-4"><Skeleton className="h-3 w-20" /></TableCell>
+                          <TableCell className="py-2 px-4 text-center"><Skeleton className="h-6 w-24 rounded" /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )
             ) : (
               <>
-                <Table wrapperClassName="h-[600px] overflow-auto overflow-x-auto" className="w-full min-w-[980px]">
-                  <TableHeader className="sticky top-0 shadow-md z-10">
-                      <TableRow className="hover:bg-transparent border-border bg-background/95 backdrop-blur-sm">
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 pl-3 pr-2 py-2 text-left min-w-[200px]">
+                <div
+                  className="h-[600px] overflow-auto [&_[data-slot=table-container]]:overflow-x-visible"
+                  ref={newTabScrollRef}
+                  onScroll={(e) => {
+                    if (activeTab === "new" && shouldVirtualizeNewTab) {
+                      const target = e.currentTarget
+                      setNewTabScrollTop(target.scrollTop)
+                    }
+                  }}
+                >
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
+                      <TableRow className="hover:bg-transparent border-border">
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                           Token
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 px-2 py-2 text-left min-w-[120px]">
-                          Creator
-                        </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 px-2 py-2 text-left min-w-[120px]">
-                          Mint
-                        </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 px-2 py-2 text-right min-w-[80px]">
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                           MC
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 px-2 py-2 text-right min-w-[70px]">
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                           Price
                         </TableHead>
-                        {activeTab !== "new" && (
-                          <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 px-2 py-2 text-left min-w-[90px]">
-                            Signals
-                          </TableHead>
-                        )}
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 px-2 py-2 text-right min-w-[60px]">
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                          1m
+                        </TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                          Vol(24h)
+                        </TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
+                          Signals
+                        </TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                           Updated
                         </TableHead>
-                        <TableHead className="font-semibold text-foreground text-[10px] sm:text-xs bg-background/95 pl-2 pr-3 py-2 text-center min-w-[100px]">
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background text-center px-4">
                           Buy
                         </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {isLoading ? (
-                        // Loading skeleton rows
-                        Array.from({ length: 5 }).map((_, index) => (
-                          <TableRow key={`loading-${index}`} className="border-border">
-                            <TableCell className="py-3 pl-4 pr-3">
-                              <div className="flex items-center gap-2">
-                                <div className="w-7 h-7 bg-secondary rounded-full animate-pulse"></div>
-                                <div className="space-y-1">
-                                  <div className="h-3 bg-secondary rounded animate-pulse w-16"></div>
-                                  <div className="h-2 bg-secondary rounded animate-pulse w-12"></div>
+                      {activeTab === "new" && shouldVirtualizeNewTab && newTabWindowed.topPad > 0 && (
+                        <TableRow className="border-border hover:bg-transparent">
+                          <TableCell colSpan={8} style={{ height: newTabWindowed.topPad }} className="p-0" />
+                        </TableRow>
+                      )}
+
+                      {(activeTab === "new" ? newTabWindowed.visible : (filteredTokens as TokenRowRuntime[])).map((token) => {
+                        const rowClassName = `cursor-pointer hover:bg-secondary/50 transition-colors border-border ${
+                          newestTokenAddress === token.address ? "animate-slide-in" : ""
+                        } ${
+                          activeTab === "new" && (token as TokenRowRuntime).momentumState === "ACCELERATING"
+                            ? "ring-1 ring-green-500/30 animate-pulse"
+                            : ""
+                        } ${
+                          activeTab === "new" && (token as TokenRowRuntime).momentumState === "COOLING" ? "opacity-70" : ""
+                        } ${activeTab === "new" && (token as TokenRowRuntime).riskLevel === "HIGH" ? "border-l-4 border-l-amber-500" : ""}`
+
+                        if (activeTab !== "new") {
+                          return (
+                            <TableRow
+                              key={token.address}
+                              onClick={() => handleTokenClick(token)}
+                              className={rowClassName}
+                            >
+                              <TableCell className="py-2 px-4">
+                                <div className="flex items-center gap-2">
+                                  <Image
+                                    src={token.logo || "/placeholder.svg"}
+                                    alt={token.symbol}
+                                    width={28}
+                                    height={28}
+                                    className="rounded-full object-cover"
+                                  />
+                                  <div className="flex flex-col">
+                                    <span className="font-semibold text-foreground text-[10px] sm:text-xs truncate max-w-[120px]">
+                                      {token.name}
+                                    </span>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[9px] sm:text-xs text-muted-foreground">{token.symbol}</span>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className={`p-0 hover:bg-primary/20 ${activeTab === "new" ? "h-11 w-11 sm:h-3 sm:w-3" : "h-3 w-3"}`}
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          navigator.clipboard.writeText(token.address)
+                                        }}
+                                        title="Copy Contract Address"
+                                        aria-label="Copy contract address"
+                                      >
+                                        <Copy className="h-1.5 w-1.5 text-muted-foreground" />
+                                      </Button>
+                                    </div>
+                                  </div>
                                 </div>
-                              </div>
-                            </TableCell>
-                            <TableCell className="py-3 px-3">
-                              <div className="h-3 bg-secondary rounded animate-pulse w-20"></div>
-                            </TableCell>
-                            <TableCell className="py-3 px-3">
-                              <div className="h-3 bg-secondary rounded animate-pulse w-16"></div>
-                            </TableCell>
-                            <TableCell className="py-3 px-3">
-                              <div className="h-3 bg-secondary rounded animate-pulse w-12"></div>
-                            </TableCell>
-                            <TableCell className="py-3 px-3">
-                              <div className="h-3 bg-secondary rounded animate-pulse w-14"></div>
-                            </TableCell>
-                            <TableCell className="py-3 px-3">
-                              <div className="h-3 bg-secondary rounded animate-pulse w-16"></div>
-                            </TableCell>
-                            <TableCell className="py-3 pl-3 pr-4">
-                              <div className="h-6 bg-secondary rounded animate-pulse w-12"></div>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      ) : (
-                        filteredTokens.map((token) => (
-                        <TableRow
-                          key={token.address}
-                          onClick={() => handleTokenClick(token)}
-                          className={`cursor-pointer hover:bg-secondary/50 transition-colors border-border ${
-                            !isLoading && newestTokenAddress === token.address ? "animate-slide-in" : ""
-                          }`}
-                        >
-                          <TableCell className="py-2.5 pl-3 pr-2 text-left align-middle">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <Image
-                                src={token.logo || "/placeholder.svg"}
-                                alt={token.symbol}
-                                width={36}
-                                height={36}
-                                className="rounded-full object-cover shrink-0 w-8 h-8 sm:w-9 sm:h-9"
-                              />
-                              <div className="flex flex-col min-w-0 flex-1">
-                                <span className="font-medium text-foreground text-[9px] sm:text-[10px] truncate leading-tight">
-                                  {token.name}
-                                </span>
-                                <div className="flex items-center gap-2 mt-0.5">
-                                  <span className="text-[8px] sm:text-[9px] text-muted-foreground truncate font-mono">{token.symbol}</span>
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-[10px] sm:text-xs py-2 px-4">
+                                {formatMarketCap(token.mc)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-[10px] sm:text-xs py-2 px-4">
+                                {formatPrice(token.price)}
+                              </TableCell>
+                              <TableCell className="text-right py-2 px-4">
+                                <div className="flex flex-col items-end leading-none">
+                                  <span
+                                    className={`font-semibold text-[10px] sm:text-xs ${token.change5m >= 0 ? "text-green-500" : "text-red-500"}`}
+                                  >
+                                    {token.change5m >= 0 ? "+" : ""}
+                                    {token.change5m.toFixed(1)}%
+                                  </span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-[10px] sm:text-xs py-2 px-4">
+                                <div className="flex flex-col items-end leading-none">
+                                  <span>{formatNumber(token.volume24h)}</span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-2 px-4">
+                                <div className="flex flex-wrap gap-1">
+                                  {token.signals.slice(0, 5).map((signal, idx) => (
+                                    <SignalBadge
+                                      key={idx}
+                                      type={signal}
+                                      size="sm"
+                                      iconOnly
+                                      boostCount={signal === "DEXBOOST_PAID" ? token.boostCount : undefined}
+                                    />
+                                  ))}
+                                  {token.signals.length > 5 && (
+                                    <span className="text-[9px] sm:text-xs text-muted-foreground">
+                                      +{token.signals.length - 5}
+                                    </span>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right text-[9px] sm:text-xs text-muted-foreground py-2 px-4">
+                                {getTimeAgo(token.updatedAt)}
+                              </TableCell>
+                              <TableCell className="py-2 px-4">
+                                <div className="flex gap-1 justify-center">
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    className="h-4 w-4 shrink-0 p-0 hover:bg-secondary/80 rounded-md"
-                                    onClick={async (e) => {
-                                      e.stopPropagation()
-                                      try {
-                                        await navigator.clipboard.writeText(token.address)
-                                        toast({
-                                          description: "Contract address copied!",
-                                          duration: 2000
-                                        })
-                                      } catch (err) {
-                                        console.error('Failed to copy contract address:', err)
-                                        toast({
-                                          description: "Failed to copy address",
-                                          variant: "destructive",
-                                          duration: 2000
-                                        })
-                                      }
-                                    }}
-                                    title="Copy Contract Address"
+                                    className={`${activeTab === "new" ? "h-11 w-11 sm:h-6 sm:w-6" : "h-6 w-6"} p-0 hover:bg-primary/20`}
+                                    onClick={(e) => openBuyLink("trojan", token.address, e)}
+                                    title="Buy on Trojan"
+                                    aria-label="Buy on Trojan"
                                   >
-                                    <Copy className="w-2 h-2 text-muted-foreground" />
+                                    <Image
+                                      src="/images/trojan.png"
+                                      alt="Trojan"
+                                      width={16}
+                                      height={16}
+                                      className="rounded"
+                                    />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className={`${activeTab === "new" ? "h-11 w-11 sm:h-6 sm:w-6" : "h-6 w-6"} p-0 hover:bg-primary/20`}
+                                    onClick={(e) => openBuyLink("axion", token.address, e)}
+                                    title="Buy on Axion"
+                                    aria-label="Buy on Axion"
+                                  >
+                                    <Image
+                                      src="/images/axiom.png"
+                                      alt="Axion"
+                                      width={16}
+                                      height={16}
+                                      className="rounded"
+                                    />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className={`${activeTab === "new" ? "h-11 w-11 sm:h-6 sm:w-6" : "h-6 w-6"} p-0 hover:bg-primary/20`}
+                                    onClick={(e) => openBuyLink("gmgn", token.address, e)}
+                                    title="Buy on GMGN"
+                                    aria-label="Buy on GMGN"
+                                  >
+                                    <Image
+                                      src="/images/gmgn.png"
+                                      alt="GMGN"
+                                      width={16}
+                                      height={16}
+                                      className="rounded"
+                                    />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className={`${activeTab === "new" ? "h-11 w-11 sm:h-6 sm:w-6" : "h-6 w-6"} p-0 hover:bg-primary/20`}
+                                    onClick={(e) => openBuyLink("bonk", token.address, e)}
+                                    title="Buy on Bonk"
+                                    aria-label="Buy on Bonk"
+                                  >
+                                    <Image
+                                      src="/images/bonk.png"
+                                      alt="Bonk"
+                                      width={16}
+                                      height={16}
+                                      className="rounded"
+                                    />
                                   </Button>
                                 </div>
-                              </div>
-                            </div>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        }
+
+                        return (
+                          <Fragment key={token.address}>
+                            <TableRow
+                              onClick={() => handleTokenClick(token)}
+                              className={rowClassName}
+                            >
+                              <TableCell className="py-2 px-4" rowSpan={2}>
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex items-center gap-2">
+                                    <Image
+                                      src={token.logo || "/placeholder.svg"}
+                                      alt={token.symbol}
+                                      width={34}
+                                      height={34}
+                                      className="rounded-md object-cover"
+                                    />
+                                    <div className="flex flex-col">
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                          {activeTab === "new" && (() => {
+                                            const runtime = token as TokenRowRuntime
+                                            const iconKey = normalizeLaunchpadIconKeyFromSource(runtime.source)
+                                            if (!iconKey) return null
+                                            const iconSrc = launchpadIcons[iconKey]
+                                            if (!iconSrc) return null
+                                            return (
+                                              <Image
+                                                src={iconSrc}
+                                                alt={iconKey}
+                                                width={14}
+                                                height={14}
+                                                className="rounded"
+                                              />
+                                            )
+                                          })()}
+                                          <span className="font-semibold text-foreground text-xs sm:text-sm truncate max-w-[160px]">
+                                            {token.name}
+                                          </span>
+                                        </div>
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] sm:text-xs text-muted-foreground">{token.symbol}</span>
+                                        {activeTab === "new" && (token as TokenRowRuntime).tradeDecision && (
+                                          <span
+                                            className={`inline-flex items-center rounded border px-1.5 py-0 h-4 leading-none text-[8px] sm:text-[9px] ${getDecisionClass(
+                                              (token as TokenRowRuntime).tradeDecision,
+                                            )}`}
+                                            title={`Decision: ${(token as TokenRowRuntime).tradeDecision}`}
+                                            aria-label={`Trade decision ${(token as TokenRowRuntime).tradeDecision}`}
+                                          >
+                                            {(token as TokenRowRuntime).tradeDecision}
+                                          </span>
+                                        )}
+                                        {activeTab === "new" && (token as TokenRowRuntime).tradeModeFit && (
+                                          <Badge
+                                            variant="secondary"
+                                            className="text-[8px] sm:text-[9px] px-1.5 py-0 h-4 leading-none"
+                                            title={`Trade mode: ${(token as TokenRowRuntime).tradeModeFit}`}
+                                          >
+                                            {(token as TokenRowRuntime).tradeModeFit}
+                                          </Badge>
+                                        )}
+                                        {activeTab === "new" && (token as TokenRowRuntime).riskLevel && (
+                                          <span
+                                            className={`inline-flex items-center rounded border px-1.5 py-0 h-4 leading-none text-[8px] sm:text-[9px] ${getRiskBadgeClass(
+                                              (token as TokenRowRuntime).riskLevel,
+                                            )}`}
+                                            title={`Risk: ${(token as TokenRowRuntime).riskLevel}`}
+                                            aria-label={`Risk level ${(token as TokenRowRuntime).riskLevel}`}
+                                          >
+                                            {(token as TokenRowRuntime).riskLevel}
+                                          </span>
+                                        )}
+                                        {activeTab === "new" && (token as TokenRowRuntime).momentumState && (
+                                          <span
+                                            className={`inline-flex items-center rounded border px-1.5 py-0 h-4 leading-none text-[8px] sm:text-[9px] ${getMomentumBadgeClass(
+                                              (token as TokenRowRuntime).momentumState,
+                                            )}`}
+                                            title={`Momentum: ${(token as TokenRowRuntime).momentumState}`}
+                                            aria-label={`Momentum ${(token as TokenRowRuntime).momentumState}`}
+                                          >
+                                            {(token as TokenRowRuntime).momentumState === "ACCELERATING"
+                                              ? "UP"
+                                              : (token as TokenRowRuntime).momentumState === "COOLING"
+                                                ? "COOL"
+                                                : "STB"}
+                                          </span>
+                                        )}
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className={`p-0 hover:bg-primary/20 ${activeTab === "new" ? "h-11 w-11 sm:h-3 sm:w-3" : "h-3 w-3"}`}
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            navigator.clipboard.writeText(token.address)
+                                          }}
+                                          title="Copy Contract Address"
+                                          aria-label="Copy contract address"
+                                        >
+                                          <Copy className="h-1.5 w-1.5 text-muted-foreground" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {(() => {
+                                    const runtime = token as TokenRowRuntime
+                                    const isHidden = Boolean(newTabHiddenDetails[runtime.address])
+                                    if (isHidden) return null
+                                    return renderNewTabDexpathDetail(runtime)
+                                  })()}
+                                </div>
+                              </TableCell>
+                          <TableCell className="text-right font-mono text-[10px] sm:text-xs py-2 px-4">
+                            {formatMarketCap(token.mc)}
                           </TableCell>
-                          <TableCell className="py-3 px-4 text-left align-middle">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <code className="bg-secondary/60 px-1 py-0.5 rounded text-[7px] sm:text-[8px] font-mono text-foreground border border-border/50">
-                                {formatCreator(token.creator || token.address)}
-                              </code>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-4 w-4 p-0 hover:bg-secondary/80 rounded-md shrink-0"
-                                onClick={async (e) => {
-                                  e.stopPropagation()
-                                  try {
-                                    const textToCopy = token.creator || token.address
-                                    await navigator.clipboard.writeText(textToCopy)
-                                    toast({
-                                      description: "Creator address copied!",
-                                      duration: 2000
-                                    })
-                                  } catch (err) {
-                                    console.error('Failed to copy creator address:', err)
-                                    toast({
-                                      description: "Failed to copy creator address",
-                                      variant: "destructive",
-                                      duration: 2000
-                                    })
-                                  }
-                                }}
-                                title="Copy Creator Address"
+                          <TableCell className="text-right font-mono text-[10px] sm:text-xs py-2 px-4">
+                            {formatPrice(token.price)}
+                          </TableCell>
+                          <TableCell className="text-right py-2 px-4">
+                            <div className="flex flex-col items-end leading-none">
+                              {(() => {
+                                const shortChange =
+                                  typeof (token as TokenRowRuntime).priceChange1m === "number"
+                                    ? ((token as TokenRowRuntime).priceChange1m as number)
+                                    : token.change5m
+                                return (
+                              <span
+                                className={`font-semibold text-[10px] sm:text-xs ${shortChange >= 0 ? "text-green-500" : "text-red-500"}`}
+                                title={`1m change: ${shortChange.toFixed(1)}%`}
+                                aria-label={`1 minute change ${shortChange.toFixed(1)} percent`}
                               >
-                                <Copy className="w-2 h-2 text-muted-foreground" />
-                              </Button>
+                                {shortChange >= 0 ? "+" : ""}
+                                {shortChange.toFixed(1)}%
+                              </span>
+                                )
+                              })()}
+                              {activeTab === "new" && typeof (token as TokenRowRuntime).priceChange24h === "number" && (
+                                <span
+                                  className={`mt-1 text-[8px] sm:text-[9px] ${
+                                    ((token as TokenRowRuntime).priceChange24h ?? 0) >= 0
+                                      ? "text-green-500/80"
+                                      : "text-red-500/80"
+                                  }`}
+                                  title={`24h change: ${((token as TokenRowRuntime).priceChange24h ?? 0).toFixed(1)}%`}
+                                  aria-label={`24 hour change ${((token as TokenRowRuntime).priceChange24h ?? 0).toFixed(1)} percent`}
+                                >
+                                  {((token as TokenRowRuntime).priceChange24h ?? 0) >= 0 ? "+" : ""}
+                                  {((token as TokenRowRuntime).priceChange24h ?? 0).toFixed(1)}%
+                                </span>
+                              )}
                             </div>
                           </TableCell>
-                          <TableCell className="py-3 px-4 text-left align-middle">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <code className="bg-secondary/60 px-1 py-0.5 rounded text-[7px] sm:text-[8px] font-mono text-foreground border border-border/50">
-                                {formatMint(token.mint || token.address)}
-                              </code>
+                          <TableCell className="text-right font-mono text-[10px] sm:text-xs py-2 px-4">
+                            <div className="flex flex-col items-end leading-none">
+                              <span>{formatNumber(token.volume24h)}</span>
+                              {activeTab === "new" && token.mc > 0 && (
+                                <span
+                                  className="mt-1 text-[8px] sm:text-[9px] text-muted-foreground"
+                                  title={`Vol/MC: ${(token.volume24h / Math.max(token.mc, 1)).toFixed(2)}x`}
+                                  aria-label={`Volume to market cap ratio ${(token.volume24h / Math.max(token.mc, 1)).toFixed(2)}x`}
+                                >
+                                  {(token.volume24h / Math.max(token.mc, 1)).toFixed(2)}x
+                                </span>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2 px-4" />
+                          <TableCell className="text-right text-[9px] sm:text-xs text-muted-foreground py-2 px-4">
+                            {getTimeAgo(token.updatedAt)}
+                          </TableCell>
+                          <TableCell className="py-2 px-4">
+                            <div className="flex gap-1 justify-center">
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                className="h-4 w-4 p-0 hover:bg-secondary/80 rounded-md shrink-0"
-                                onClick={async (e) => {
-                                  e.stopPropagation()
-                                  try {
-                                    const textToCopy = token.mint || token.address
-                                    await navigator.clipboard.writeText(textToCopy)
-                                    toast({
-                                      description: "Mint address copied!",
-                                      duration: 2000
-                                    })
-                                  } catch (err) {
-                                    console.error('Failed to copy mint address:', err)
-                                    toast({
-                                      description: "Failed to copy mint address",
-                                      variant: "destructive",
-                                      duration: 2000
-                                    })
-                                  }
-                                }}
-                                title="Copy Mint Address"
-                              >
-                                <Copy className="w-2 h-2 text-muted-foreground" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-2 px-2 text-right font-mono text-[9px] sm:text-[10px] align-middle whitespace-nowrap font-medium">
-                            <span className="text-foreground">{formatMarketCap(token.mc)}</span>
-                          </TableCell>
-                          <TableCell className="py-2 px-2 text-right font-mono text-[9px] sm:text-[10px] align-middle whitespace-nowrap font-medium">
-                            <span className="text-foreground">${formatPrice(token.price)}</span>
-                          </TableCell>
-                          {activeTab !== "new" && (
-                            <TableCell className="py-3 px-4 text-left align-middle">
-                              <div className="flex flex-wrap gap-1">
-                                {token.signals.slice(0, 5).map((signal, idx) => (
-                                  <SignalBadge
-                                    key={idx}
-                                    type={signal}
-                                    size="sm"
-                                    iconOnly
-                                    boostCount={signal === "DEXBOOST_PAID" ? token.boostCount : undefined}
-                                  />
-                                ))}
-                                {token.signals.length > 5 && (
-                                  <span className="text-[9px] sm:text-xs text-muted-foreground">
-                                    +{token.signals.length - 5}
-                                  </span>
-                                )}
-                              </div>
-                            </TableCell>
-                          )}
-                          <TableCell className="py-2 px-2 text-right text-[8px] sm:text-[9px] text-muted-foreground align-middle whitespace-nowrap">
-                            <span className="font-medium">{getTimeAgo(token.updatedAt)}</span>
-                          </TableCell>
-                          <TableCell className="py-2 pl-2 pr-3 text-center align-middle">
-                            <div className="flex gap-1.5 justify-center items-center">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 w-7 p-0 hover:bg-primary/20 rounded-md"
+                                className={`${activeTab === "new" ? "h-11 w-11 sm:h-6 sm:w-6" : "h-6 w-6"} p-0 hover:bg-primary/20`}
                                 onClick={(e) => openBuyLink("trojan", token.address, e)}
                                 title="Buy on Trojan"
+                                aria-label="Buy on Trojan"
                               >
                                 <Image
                                   src="/images/trojan.png"
@@ -989,42 +2619,202 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                className="h-6 w-6 p-0 hover:bg-primary/20"
+                                className={`${activeTab === "new" ? "h-11 w-11 sm:h-6 sm:w-6" : "h-6 w-6"} p-0 hover:bg-primary/20`}
                                 onClick={(e) => openBuyLink("axion", token.address, e)}
                                 title="Buy on Axion"
+                                aria-label="Buy on Axion"
                               >
                                 <Image src="/images/axiom.png" alt="Axion" width={16} height={16} className="rounded" />
                               </Button>
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                className="h-6 w-6 p-0 hover:bg-primary/20"
+                                className={`${activeTab === "new" ? "h-11 w-11 sm:h-6 sm:w-6" : "h-6 w-6"} p-0 hover:bg-primary/20`}
                                 onClick={(e) => openBuyLink("gmgn", token.address, e)}
                                 title="Buy on GMGN"
+                                aria-label="Buy on GMGN"
                               >
                                 <Image src="/images/gmgn.png" alt="GMGN" width={16} height={16} className="rounded" />
                               </Button>
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                className="h-6 w-6 p-0 hover:bg-primary/20"
+                                className={`${activeTab === "new" ? "h-11 w-11 sm:h-6 sm:w-6" : "h-6 w-6"} p-0 hover:bg-primary/20`}
                                 onClick={(e) => openBuyLink("bonk", token.address, e)}
                                 title="Buy on Bonk"
+                                aria-label="Buy on Bonk"
                               >
                                 <Image src="/images/bonk.png" alt="Bonk" width={16} height={16} className="rounded" />
                               </Button>
                             </div>
                           </TableCell>
                         </TableRow>
-                        ))
+
+                        <TableRow
+                          onClick={() => handleTokenClick(token)}
+                          className={rowClassName}
+                        >
+                          <TableCell colSpan={7} className="px-4 py-2">
+                            <div className="flex flex-col gap-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                {token.signals.slice(0, 6).map((signal, idx) => (
+                                  <SignalBadge
+                                    key={idx}
+                                    type={signal}
+                                    size="sm"
+                                    iconOnly
+                                    boostCount={signal === "DEXBOOST_PAID" ? token.boostCount : undefined}
+                                  />
+                                ))}
+                                {typeof (token as TokenRowRuntime).confidenceScore === "number" && (
+                                  <ConfidenceBar score={(token as TokenRowRuntime).confidenceScore ?? 0} />
+                                )}
+                                {token.signals.length > 6 && (
+                                  <span className="text-[9px] sm:text-xs text-muted-foreground">+{token.signals.length - 6}</span>
+                                )}
+                              </div>
+
+                              <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-[9px] sm:text-[10px] text-muted-foreground">
+                                {typeof (token as TokenRowRuntime).buyCount === "number" &&
+                                  typeof (token as TokenRowRuntime).sellCount === "number" && (
+                                    <div title="Buy Pressure (buys vs sells)" aria-label="Buy pressure">
+                                      <span className="text-green-600">🟢</span> Buy Pressure {(token as TokenRowRuntime).buyCount} / {(token as TokenRowRuntime).sellCount}
+                                    </div>
+                                  )}
+
+                                {typeof (token as TokenRowRuntime).organicPct === "number" && (
+                                  <div title="Organic volume percentage" aria-label="Organic volume percentage">
+                                    <span className={((token as TokenRowRuntime).organicPct ?? 0) >= 70 ? "text-green-600" : "text-yellow-600"}>
+                                      {((token as TokenRowRuntime).organicPct ?? 0) >= 70 ? "🟢" : "🟡"}
+                                    </span>{" "}
+                                    Organic {(token as TokenRowRuntime).organicPct?.toFixed(0)}%
+                                  </div>
+                                )}
+
+                                {typeof (token as TokenRowRuntime).top10HoldingsPct === "number" && (
+                                  <div title="Whale Risk (Top10 holdings)" aria-label="Whale risk">
+                                    <span className={((token as TokenRowRuntime).top10HoldingsPct ?? 0) >= 25 ? "text-yellow-600" : "text-green-600"}>
+                                      {((token as TokenRowRuntime).top10HoldingsPct ?? 0) >= 25 ? "🟡" : "🟢"}
+                                    </span>{" "}
+                                    Whale Top10 {(token as TokenRowRuntime).top10HoldingsPct?.toFixed(1)}%
+                                  </div>
+                                )}
+
+                                {typeof (token as TokenRowRuntime).devHoldingsPct === "number" && (
+                                  <div title="Dev Risk (dev holdings)" aria-label="Dev risk">
+                                    <span className={((token as TokenRowRuntime).devHoldingsPct ?? 0) <= 5 ? "text-green-600" : "text-yellow-600"}>
+                                      {((token as TokenRowRuntime).devHoldingsPct ?? 0) <= 5 ? "🟢" : "🟡"}
+                                    </span>{" "}
+                                    Dev {(token as TokenRowRuntime).devHoldingsPct?.toFixed(1)}%
+                                  </div>
+                                )}
+
+                                {((token as TokenRowRuntime).createdAt || (token as TokenRowRuntime).updatedAt) && (
+                                  <div title="Freshness" aria-label="Freshness">
+                                    <span className="text-green-600">🟢</span> Fresh {getTimeAgo(((token as TokenRowRuntime).createdAt ?? token.updatedAt) as string)}
+                                  </div>
+                                )}
+
+                                {typeof (token as TokenRowRuntime).priceChange1m === "number" && (
+                                  <div title="Momentum radar (1m)" aria-label="Momentum radar">
+                                    <span
+                                      className={
+                                        (token as TokenRowRuntime).momentumState === "ACCELERATING"
+                                          ? "text-green-600"
+                                          : (token as TokenRowRuntime).momentumState === "COOLING"
+                                            ? "text-red-600"
+                                            : "text-yellow-600"
+                                      }
+                                    >
+                                      {(token as TokenRowRuntime).momentumState === "ACCELERATING"
+                                        ? "🟢"
+                                        : (token as TokenRowRuntime).momentumState === "COOLING"
+                                          ? "🔴"
+                                          : "🟡"}
+                                    </span>{" "}
+                                    Radar {(token as TokenRowRuntime).momentumState}
+                                  </div>
+                                )}
+
+                                {typeof (token as TokenRowRuntime).spikeProbability === "number" && (
+                                  <div
+                                    title={
+                                      "Often Spike % (proxy). Spike Probability = score × 100, where score = w1*priceMomentum + w2*volumeAcceleration + w3*(liquidity/MC) + w4*marketCapBias + w5*recencyFactor. This is a fast approximation (not long historical candles)."
+                                    }
+                                    aria-label="Often spike probability"
+                                  >
+                                    <span
+                                      className={`inline-flex items-center rounded border px-1.5 py-0 h-4 leading-none text-[8px] sm:text-[9px] ${getSpikeBadgeClass(
+                                        (token as TokenRowRuntime).spikeProbability ?? 0,
+                                      )}`}
+                                      title="Often Spike probability band"
+                                      aria-label="Spike probability band"
+                                    >
+                                      SPIKE
+                                    </span>{" "}
+                                    <span className={getSpikeBand((token as TokenRowRuntime).spikeProbability ?? 0).tone}>🔥</span>{" "}
+                                    Often Spike {Math.round((token as TokenRowRuntime).spikeProbability ?? 0)}%
+                                  </div>
+                                )}
+                              </div>
+
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      </Fragment>
+                        )
+                      })}
+
+                      {activeTab === "new" && shouldVirtualizeNewTab && newTabWindowed.bottomPad > 0 && (
+                        <TableRow className="border-border hover:bg-transparent">
+                          <TableCell colSpan={8} style={{ height: newTabWindowed.bottomPad }} className="p-0" />
+                        </TableRow>
                       )}
                     </TableBody>
                   </Table>
+                </div>
               </>
             )}
           </>
         )}
       </CardContent>
+
+      {activeTab === "new" && (
+        <Drawer
+          open={Boolean(newTabDetailsDrawerToken)}
+          onOpenChange={(open) => {
+            if (!open) setNewTabDetailsDrawerToken(null)
+          }}
+        >
+          <DrawerContent className="max-h-[80vh]">
+            <DrawerHeader>
+              <DrawerTitle className="text-sm">
+                {newTabDetailsDrawerToken ? `${newTabDetailsDrawerToken.name} (${newTabDetailsDrawerToken.symbol})` : "Dexpath Detail"}
+              </DrawerTitle>
+            </DrawerHeader>
+            <div className="px-4 pb-4 overflow-auto">
+              {newTabDetailsDrawerToken ? renderNewTabDexpathDetail(newTabDetailsDrawerToken) : null}
+            </div>
+            <DrawerFooter>
+              {newTabDetailsDrawerToken && newTabHiddenDetails[newTabDetailsDrawerToken.address] && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setNewTabHiddenDetails((prev) => ({ ...prev, [newTabDetailsDrawerToken.address]: false }))
+                    setNewTabDetailsDrawerToken(null)
+                  }}
+                >
+                  Show Inline
+                </Button>
+              )}
+              <DrawerClose asChild>
+                <Button type="button">Close</Button>
+              </DrawerClose>
+            </DrawerFooter>
+          </DrawerContent>
+        </Drawer>
+      )}
       {/* Prelaunch Detail Modal */}
       <Dialog open={isPrelaunchModalOpen} onOpenChange={setIsPrelaunchModalOpen}>
         <DialogContent className="max-w-2xl">
@@ -1087,7 +2877,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                           handleCopyWallet(selectedPrelaunch.devWallet)
                         }}
                       >
-                        <Copy className="h-1.5 w-1.5 mr-1" />
+                        <Copy className="h-2 w-2 mr-1" />
                         Copy
                       </Button>
                     </div>
@@ -1112,7 +2902,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-secondary/30 rounded-lg p-4 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Copy className="h-1.5 w-1.5 text-muted-foreground" />
+                      <Copy className="h-3 w-3 text-muted-foreground" />
                       <span className="text-sm sm:text-sm">Wallet Copies</span>
                     </div>
                     <span className="text-2xl sm:text-2xl font-bold">

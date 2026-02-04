@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { AlertTriangle, BadgeCheck, CheckCircle2, Crosshair, Flame, TrendingUp, Users } from "lucide-react"
+import { AlertTriangle, BadgeCheck, CheckCircle2, Crosshair, Flame, RefreshCw, Rocket, TrendingUp, Users } from "lucide-react"
 import { analyzeToken, extractMobulaTokenDetailsInputs } from "@/lib/token-analyzer"
 import { Progress } from "@/components/ui/progress"
 
@@ -14,6 +14,12 @@ function formatPct(v: unknown, digits = 2) {
 function formatPct01(v: number) {
   if (!Number.isFinite(v)) return "--"
   return `${(v * 100).toFixed(2)}%`
+}
+
+function formatPctSmart(v: unknown) {
+  const n = typeof v === "number" ? v : Number(v)
+  if (!Number.isFinite(n)) return "--"
+  return n > 1 ? `${n.toFixed(2)}%` : `${(n * 100).toFixed(2)}%`
 }
 
 function formatNum(v: number, digits = 2) {
@@ -68,6 +74,11 @@ export function SignalAnalyzerTab({
   const top10 = inputs?.top10HoldingsPercentage
   const dev = inputs?.devHoldingsPercentage
   const snipers = inputs?.snipersHoldingsPercentage
+  const bondedRaw = getPath(mobulaData, "bonded") ?? getPath(mobulaData, "isBonded")
+  const bonded = bondedRaw === true || bondedRaw === "true"
+  const bondingValue = bonded
+    ? "100.00%"
+    : formatPctSmart(getPath(mobulaData, "bondingPercentage") ?? inputs?.bondingPercentage)
   const proTraders = getPath(mobulaData, "proTradersCount") ?? getPath(mobulaData, "pro_traders_count")
   const smartTraders = getPath(mobulaData, "smartTradersCount") ?? getPath(mobulaData, "smart_traders_count")
   const freshTraders = getPath(mobulaData, "freshTradersCount") ?? getPath(mobulaData, "fresh_traders_count")
@@ -124,6 +135,16 @@ export function SignalAnalyzerTab({
       {/* Analyzer core blocks */}
       <div className="space-y-4">
         <div className="border-b border-border/40 pb-3">
+          <div className="mb-2 space-y-1 text-xs text-muted-foreground">
+            <div className="inline-flex items-center gap-2 text-xs font-bold">
+              <RefreshCw className="h-3.5 w-3.5 text-emerald-400" />
+              Created tokens: {formatCount(getPath(mobulaData, "deployerTokensCount"))}
+            </div><br/>
+            <div className="inline-flex items-center gap-2 text-xs font-bold">
+              <Rocket className="h-3.5 w-3.5 text-sky-400" />
+              Creator migration tokens: {formatCount(getPath(mobulaData, "deployerMigrationsCount"))}
+            </div>
+          </div>
           <div className="text-xs font-medium">Confidence</div>
           {!analysis ? (
             <div className="mt-2 text-xs text-muted-foreground">Waiting for analyzer data…</div>
@@ -186,7 +207,7 @@ export function SignalAnalyzerTab({
                 { label: "Buys/Sells", value: formatNum(analysis.tradeBias, 2) },
                 { label: "Organic Vol", value: formatPct01(analysis.organicVolumeRatio) },
                 { label: "Liq/MC", value: formatPct01(analysis.liquidityRatio) },
-                { label: "Bonding", value: formatPct01(analysis.bondingProgress) },
+                { label: "Bonding", value: bondingValue },
                 { label: "Concentration", value: formatNum(analysis.concentrationScore, 3) },
                 { label: "Trend", value: formatNum(analysis.trendStrength, 1) },
               ].map((r) => (
@@ -198,19 +219,6 @@ export function SignalAnalyzerTab({
             </div>
           </div>
         ) : null}
-      </div>
-
-      {/* Warning */}
-      <div className="rounded-xl border border-border bg-amber-500/10 px-4 py-3">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5">
-            <AlertTriangle className="h-4 w-4 text-amber-500" />
-          </div>
-          <div className="text-amber-200">
-            <div className="text-sm font-medium">New tokens may not be accurately detected</div>
-            <div className="mt-1 text-xs text-amber-200/80">and could contain malicious methods. Trade cautiously.</div>
-          </div>
-        </div>
       </div>
 
     </div>

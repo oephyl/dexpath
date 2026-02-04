@@ -10,6 +10,7 @@ import { useState, useEffect, useRef } from "react"
 import { fetchTrendingTokens } from "@/lib/api"
 import { ChevronsLeft, ChevronsRight, Copy } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
+import { toast } from "sonner"
 
 // No mock tokens; data comes from API
 
@@ -95,6 +96,16 @@ export function TokenTrending({
     if (mc >= 1_000_000) return `${(mc / 1_000_000).toFixed(1)}M`
     if (mc >= 1_000) return `${(mc / 1_000).toFixed(0)}K`
     return `${mc.toFixed(0)}`
+  }
+
+  const copyToClipboard = async (text: string, message: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success(message)
+    } catch (error) {
+      console.error("[v0] Copy failed:", error)
+      toast.error("Copy failed")
+    }
   }
 
   return (
@@ -190,7 +201,7 @@ export function TokenTrending({
                         className="h-2.5 w-2.5 p-0 hover:bg-primary/20 ml-0.5"
                         onClick={(e) => {
                           e.stopPropagation()
-                          navigator.clipboard.writeText(token.address)
+                          copyToClipboard(token.address, "Copied contract address")
                         }}
                         title="Copy CA"
                       >

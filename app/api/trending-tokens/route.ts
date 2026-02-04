@@ -1,7 +1,9 @@
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
-    const timeframe = searchParams.get("timeframe") || "5m"
+    const requestedTimeframe = searchParams.get("timeframe") || "5m"
+    const allowed = new Set(["5m", "1h", "24h"])
+    const timeframe = allowed.has(requestedTimeframe) ? requestedTimeframe : "5m"
 
     const apiUrl = `https://api.jup.ag/tokens/v2/toptrending/${timeframe}?limit=5`
 
@@ -22,14 +24,16 @@ export async function GET(request: Request) {
     })
 
     if (!response.ok) {
-      throw new Error(`API request failed: ${response.status}`)
+      const errorText = await response.text().catch(() => "")
+      console.error("[v0] Jupiter trending API error", response.status, errorText)
+      return Response.json([], { status: 200 })
     }
 
-    const data = await response.json()
+    const data = await response.json().catch(() => [])
 
     return Response.json(data)
   } catch (error) {
     console.error("Error fetching trending tokens:", error)
-    return Response.json({ error: "Failed to fetch trending tokens" }, { status: 500 })
+    return Response.json([], { status: 200 })
   }
 }

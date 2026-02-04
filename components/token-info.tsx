@@ -73,8 +73,7 @@ export function TokenInfoSection({
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Token Information</h2>
-        <Badge variant="outline" className="text-[10px]">Mobula</Badge>
+        <h2 className="text-lg font-semibold">Token Information</h2> 
       </div>
 
       {loading && <div className="text-xs text-muted-foreground">Updating…</div>}

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -8,9 +9,11 @@ import { Copy } from "lucide-react"
 import type { TokenRow } from "@/lib/mock"
 import { fetchPumpFunTokens } from "@/lib/api"
 import { Skeleton } from "@/components/ui/skeleton"
+import { toast } from "sonner"
 
 export function FeaturedAdToken({ index = 0 }: { index?: number }) {
   const [token, setToken] = useState<TokenRow | null>(null)
+  const router = useRouter()
 
   useEffect(() => {
     const loadFeaturedToken = async () => {
@@ -55,7 +58,17 @@ export function FeaturedAdToken({ index = 0 }: { index?: number }) {
   }
 
   return (
-    <Card className="border-primary/20 bg-secondary/30 hover:bg-secondary/50 transition-colors relative min-w-[180px] lg:min-w-0 lg:w-full flex-shrink-0 h-9">
+    <Card
+      className="border-primary/20 bg-secondary/30 hover:bg-secondary/50 transition-colors relative min-w-[180px] lg:min-w-0 lg:w-full flex-shrink-0 h-9 cursor-pointer"
+      onClick={() => {
+        try {
+          localStorage.setItem(`token_${token.address}`, JSON.stringify(token))
+        } catch (error) {
+          console.error("[v0] Failed to store selected token:", error)
+        }
+        router.push(`/token/${token.address}`)
+      }}
+    >
       <CardContent className="p-0 h-full flex items-center px-2">
         <div className="flex items-center justify-between gap-2 w-full">
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -76,7 +89,13 @@ export function FeaturedAdToken({ index = 0 }: { index?: number }) {
                   className="h-2.5 w-2.5 p-0 hover:bg-primary/20 ml-0.5"
                   onClick={(e) => {
                     e.stopPropagation()
-                    navigator.clipboard.writeText(token.address)
+                    navigator.clipboard
+                      .writeText(token.address)
+                      .then(() => toast.success("Copied contract address"))
+                      .catch((error) => {
+                        console.error("[v0] Copy failed:", error)
+                        toast.error("Copy failed")
+                      })
                   }}
                   title="Copy CA"
                 >
@@ -88,7 +107,15 @@ export function FeaturedAdToken({ index = 0 }: { index?: number }) {
           <Button
             size="sm"
             className="bg-primary hover:bg-primary/90 text-black font-bold text-[9px] h-6 px-3"
-            onClick={() => window.open(`/token/${token.address}`, "_blank")}
+            onClick={(e) => {
+              e.stopPropagation()
+              try {
+                localStorage.setItem(`token_${token.address}`, JSON.stringify(token))
+              } catch (error) {
+                console.error("[v0] Failed to store selected token:", error)
+              }
+              router.push(`/token/${token.address}`)
+            }}
           >
             BUY
           </Button>

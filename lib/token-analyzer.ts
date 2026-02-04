@@ -19,6 +19,7 @@ export type TokenAnalyzerInputs = {
   liquidityUSD?: number
   liquidityMaxUSD?: number
   marketCapUSD?: number
+  bondingPercentage?: number
 
   // Holders & concentration (percent or ratio)
   holdersCount?: number
@@ -117,7 +118,7 @@ export function analyzeToken(inputs: TokenAnalyzerInputs): TokenAnalyzerMetrics 
 
   // C. Liquidity Risk
   const liquidityRatio = liquidityUSD / Math.max(marketCapUSD, 1)
-  const bondingProgress = liquidityUSD / Math.max(liquidityMaxUSD, 1)
+  const bondingProgress = toRatioMaybe(inputs.bondingPercentage)
 
   // D. Holder Concentration (Rug Risk)
   const concentrationScore = top10 + devHoldings + snipers
@@ -243,6 +244,7 @@ export function extractMobulaTokenDetailsInputs(mobulaJson: any): TokenAnalyzerI
     liquidityUSD: asNumber(d?.liquidityUSD ?? d?.liquidity_usd ?? d?.liquidity),
     liquidityMaxUSD: asNumber(d?.liquidityMaxUSD ?? d?.liquidity_max_usd ?? d?.liquidityMax),
     marketCapUSD: asNumber(d?.marketCapUSD ?? d?.market_cap_usd ?? d?.marketCap ?? d?.mcap),
+    bondingPercentage: asNumber(d?.bondingPercentage ?? d?.bonding_percentage ?? d?.bondingPct),
 
     holdersCount: asNumber(d?.holdersCount ?? d?.holders_count ?? d?.holders),
     top10HoldingsPercentage: asNumber(d?.top10HoldingsPercentage ?? d?.top10_holdings_pct ?? d?.top10Pct),

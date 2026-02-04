@@ -7,13 +7,23 @@ import { useRouter } from "next/navigation"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { SignalBadge } from "./signal-badge"
-import { formatMarketCap, formatPrice, formatNumber } from "@/lib/format"
+import { formatMarketCap, formatPrice, formatNumber, formatCount } from "@/lib/format"
 import type { SignalType, TokenRow } from "@/lib/mock"
 import Image from "next/image"
 import { Copy, Target, Rocket, Construction, CheckCircle2, XCircle, AlertTriangle, Heart, Repeat2, MessageCircle, Plus, SearchX } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Drawer,
   DrawerClose,
@@ -34,7 +44,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { fetchCTOTokens } from "@/lib/api"
 import { generateTokenSummary } from "@/lib/token-summary"
 
 interface TokenTableProps {
@@ -116,6 +125,11 @@ type RuntimeTokenExtensions = {
   smartTradersCount?: number
   freshTradersCount?: number
   tradeDecision?: "BUY" | "WATCH" | "SKIP"
+  exchangeName?: string
+  exchangeLogo?: string
+  adType?: string
+  adImpressions?: number
+  adDurationHours?: number
 }
 
 type TokenRowRuntime = TokenRow & RuntimeTokenExtensions
@@ -134,6 +148,40 @@ const pickString = (obj: any, keys: string[]) => {
   for (const key of keys) {
     const value = obj?.[key]
     if (typeof value === "string" && value.length > 0) return value
+  }
+  return undefined
+}
+
+const parseBoostAmount = (value: unknown) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string") {
+    const match = value.match(/[\d.]+/)
+    if (!match) return undefined
+    const parsed = Number.parseFloat(match[0])
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  return undefined
+}
+
+const parseClaimDate = (value: unknown) => {
+  if (value === undefined || value === null) return undefined
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ms = value < 1_000_000_000_000 ? value * 1000 : value
+    const date = new Date(ms)
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (!trimmed) return undefined
+    const numeric = Number(trimmed)
+    if (Number.isFinite(numeric)) {
+      const ms = numeric < 1_000_000_000_000 ? numeric * 1000 : numeric
+      const date = new Date(ms)
+      return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+    }
+    const ms = Date.parse(trimmed)
+    if (!Number.isFinite(ms)) return undefined
+    return new Date(ms).toISOString()
   }
   return undefined
 }
@@ -747,6 +795,106 @@ const mapMobulaPulseItemToTokenRow = (item: any, launchpadFilter: string, reques
   }
 }
 
+const mapMobulaDetailsToTokenRow = (address: string, header: string | undefined, mobulaJson: any): TokenRowRuntime => {
+  const data = mobulaJson?.data?.data ?? mobulaJson?.data ?? mobulaJson ?? {}
+
+  const name =
+    data?.name ??
+    data?.tokenName ??
+    data?.token_name ??
+    data?.symbol ??
+    "Unknown"
+  const symbol = data?.symbol ?? data?.token_symbol ?? data?.tokenSymbol ?? "???"
+  const logo = data?.logo ?? data?.image ?? data?.logo_url ?? data?.logoUrl ?? header ?? "/placeholder.svg"
+
+  const price = typeof data?.price === "number" ? data.price : Number(data?.price ?? 0)
+  const mc = typeof data?.marketCapUSD === "number" ? data.marketCapUSD : Number(data?.marketCap ?? data?.market_cap ?? 0)
+  const liquidity =
+    typeof data?.liquidityUSD === "number" ? data.liquidityUSD : Number(data?.liquidity ?? data?.liquidity_usd ?? 0)
+  const volume24h =
+    typeof data?.volume24hUSD === "number" ? data.volume24hUSD : Number(data?.volume_24h_usd ?? data?.volume24h ?? 0)
+
+  const change1h = Number(data?.priceChange1h ?? data?.price_change_1h ?? 0)
+  const change5m = Number(data?.priceChange5m ?? data?.price_change_5m ?? data?.price_change_5min ?? 0)
+  const priceChange24h = Number(data?.priceChange24h ?? data?.price_change_24h ?? 0)
+
+  const updatedAt =
+    typeof data?.updatedAt === "string"
+      ? data.updatedAt
+      : typeof data?.lastUpdate === "string"
+        ? data.lastUpdate
+        : new Date().toISOString()
+
+  const signals: SignalType[] = []
+
+  const top10HoldingsPct = normalizePct(
+    pickNumber(data, [
+      "top10HoldingsPercentage",
+      "top10HoldingsPct",
+      "top10_holdings_pct",
+      "top10_holdings",
+      "topHoldersPct",
+    ]),
+  )
+  const devHoldingsPct = normalizePct(
+    pickNumber(data, [
+      "devHoldingsPercentage",
+      "devHoldingsPct",
+      "dev_holdings_pct",
+      "dev_holding_percent",
+    ]),
+  )
+  const bondedFlag = Boolean(data?.bonded ?? data?.isBonded ?? data?.bonding_completed)
+  const bondingPct = bondedFlag
+    ? 100
+    : normalizePct(
+        pickNumber(data, [
+          "bondingPercentage",
+          "bonding_percentage",
+          "bondingPct",
+          "bonding_pct",
+          "bondingProgress",
+          "bonding_progress",
+        ]),
+      )
+
+  const mappedBase: TokenRowRuntime = {
+    address,
+    name,
+    symbol,
+    logo,
+    price: Number.isFinite(price) ? price : 0,
+    change5m: Number.isFinite(change5m) ? change5m : 0,
+    change1h: Number.isFinite(change1h) ? change1h : 0,
+    mc: Number.isFinite(mc) ? mc : 0,
+    liquidity: Number.isFinite(liquidity) ? liquidity : 0,
+    volume24h: Number.isFinite(volume24h) ? volume24h : 0,
+    updatedAt,
+    signals,
+    priceChange24h: Number.isFinite(priceChange24h) ? priceChange24h : 0,
+    top10HoldingsPct,
+    devHoldingsPct,
+    bondingPct,
+  }
+
+  const confidenceScore = computeConfidenceScore(data, mappedBase)
+  const momentumState = classifyMomentumState(mappedBase)
+  const riskLevel = classifyRiskLevel(mappedBase)
+  const tradeModeFit = classifyTradeModeFit(mappedBase)
+  const tradeDecision = decideTradeAction({ confidenceScore, riskLevel, momentumState })
+  const spikeProbability = computeSpikeProbabilityProxy(mappedBase)
+
+  return {
+    ...mappedBase,
+    confidenceScore,
+    momentumState,
+    riskLevel,
+    tradeModeFit,
+    tradeDecision,
+    spikeProbability,
+  }
+}
+
 const mockKOLCalls: KOLCall[] = [
   {
     id: "kol_001",
@@ -866,20 +1014,32 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   const [activeTab, setActiveTab] = useState<string>("new")
   const [launchpadFilter, setLaunchpadFilter] = useState<string>("pumpfun")
   const [boostFilter, setBoostFilter] = useState<string>("all")
+  const [boostRefreshTick, setBoostRefreshTick] = useState(0)
   const [activePreset, setActivePreset] = useState<PresetKey | undefined>(undefined)
   const [mobulaTokens, setMobulaTokens] = useState<TokenRowRuntime[]>([])
   const [mobulaRateLimited, setMobulaRateLimited] = useState(false)
   const [mobulaFetchStatus, setMobulaFetchStatus] = useState<"idle" | "loading" | "ready" | "error" | "rate_limited">("idle")
   const [mobulaLastMappedCount, setMobulaLastMappedCount] = useState<number | null>(null)
   const [mobulaRefreshTick, setMobulaRefreshTick] = useState(0)
+  const [boostTokens, setBoostTokens] = useState<TokenRowRuntime[]>([])
+  const [boostLoading, setBoostLoading] = useState(false)
+  const [boostError, setBoostError] = useState<string | null>(null)
+  const [adsTokens, setAdsTokens] = useState<TokenRowRuntime[]>([])
+  const [adsLoading, setAdsLoading] = useState(false)
+  const [adsError, setAdsError] = useState<string | null>(null)
+  const [dexPaidTokens, setDexPaidTokens] = useState<TokenRowRuntime[]>([])
+  const [dexPaidLoading, setDexPaidLoading] = useState(false)
+  const [dexPaidError, setDexPaidError] = useState<string | null>(null)
   const [newTabHiddenDetails, setNewTabHiddenDetails] = useState<Record<string, boolean>>({})
   const [newTabDetailsDrawerToken, setNewTabDetailsDrawerToken] = useState<TokenRowRuntime | null>(null)
   const mobulaIntervalRef = useRef<number | null>(null)
   const mobulaInitialLoadedRef = useRef(false)
-  const [ctoTokens, setCtoTokens] = useState<TokenRow[]>([])
+  const [ctoTokens, setCtoTokens] = useState<TokenRowRuntime[]>([])
   const [loadingCTO, setLoadingCTO] = useState(false)
   const [ctoRateLimited, setCtoRateLimited] = useState(false)
   const [showPrelaunchForm, setShowPrelaunchForm] = useState(false)
+  const [snipeNotice, setSnipeNotice] = useState<string | null>(null)
+  const [snipeDialogOpen, setSnipeDialogOpen] = useState(false)
   const [prelaunchForm, setPrelaunchForm] = useState({
     tokenName: "",
     tokenSymbol: "",
@@ -918,9 +1078,6 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   const [selectedPrelaunch, setSelectedPrelaunch] = useState<any>(null)
   const [isPrelaunchModalOpen, setIsPrelaunchModalOpen] = useState(false)
 
-  const seenCTOTokens = useRef<Set<string>>(new Set())
-  const [ctoTokensWithTime, setCtoTokensWithTime] = useState<TokenRow[]>([])
-
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("prelaunch-tracking", JSON.stringify(trackingData))
@@ -928,76 +1085,110 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   }, [trackingData])
 
   useEffect(() => {
-    if (activeTab === "cto") {
-      let isInitialLoad = true
+    if (activeTab !== "cto") return
+    let aborted = false
 
-      const loadCTO = async () => {
-        if (ctoRateLimited) {
-          console.log("[v0] Skipping CTO fetch - rate limited")
-          return
+    const fetchCTO = async () => {
+      try {
+        setLoadingCTO(true)
+        setCtoRateLimited(false)
+        setCtoTokens([])
+
+        const res = await fetch("/api/cto-tokens")
+        if (!res.ok) {
+          if (res.status === 429) setCtoRateLimited(true)
+          throw new Error(`CTO fetch failed: ${res.status}`)
         }
+        const json = await res.json().catch(() => null)
+        const items: any[] = Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : []
 
-        console.log("[v0] Loading CTO tokens...")
-        if (isInitialLoad) {
-          setLoadingCTO(true)
-        }
-        try {
-          const tokens = await fetchCTOTokens()
-          console.log("[v0] Loaded CTO tokens:", tokens.length)
+        const candidates = items
+          .map((item) => ({
+            tokenAddress: item?.tokenAddress ?? item?.token_address,
+            header: item?.header ?? item?.icon ?? item?.image,
+            claimDate: parseClaimDate(
+              pickString(item, ["claimDate", "claim_date", "claimedAt", "claimed_at"]) ?? item?.claimDate,
+            ),
+            name: pickString(item, ["name", "tokenName", "token_name"]),
+            symbol: pickString(item, ["symbol", "tokenSymbol", "token_symbol"]),
+            logo: item?.icon ?? item?.header ?? item?.image,
+            price: item?.priceUsd ?? item?.price_usd,
+            mc: item?.marketCap ?? item?.market_cap,
+            liquidity: item?.liquidity,
+            volume24h: item?.volume24h ?? item?.volume_24h,
+            change5m: item?.priceChange5m ?? item?.price_change_5m,
+            change1h: item?.priceChange1h ?? item?.price_change_1h,
+            exchangeName: pickString(item?.exchange, ["name"]),
+            exchangeLogo: pickString(item?.exchange, ["logo"]),
+          }))
+          .filter((it) => typeof it.tokenAddress === "string" && it.tokenAddress.length > 0)
+          .slice(0, 50)
 
-          if ((tokens as any).rateLimit) {
-            console.log("[v0] CTO API is rate limited")
-            setCtoRateLimited(true)
-            setTimeout(
-              () => {
-                console.log("[v0] Resetting CTO rate limit status")
-                setCtoRateLimited(false)
-              },
-              5 * 60 * 1000,
-            )
-            return
-          }
+        const results = await Promise.allSettled(
+          candidates.map(async (candidate) => {
+            try {
+              const mobulaRes = await fetch(`/api/mobula-token-details/${candidate.tokenAddress}`)
+              if (!mobulaRes.ok) throw new Error(`Mobula details failed: ${mobulaRes.status}`)
+              const mobulaJson = await mobulaRes.json()
+              const mapped = mapMobulaDetailsToTokenRow(candidate.tokenAddress, candidate.header, mobulaJson)
+              const withSignals = { ...mapped, signals: ["CTO"] as SignalType[] }
 
-          const now = new Date()
-          const tokensWithTime = tokens.map((token) => {
-            // If token already seen, preserve its original timestamp
-            const existingToken = ctoTokensWithTime.find((t) => t.address === token.address)
-            if (existingToken) {
-              return existingToken
-            }
+              const mobulaData = mobulaJson?.data?.data ?? mobulaJson?.data ?? mobulaJson ?? {}
+              const exchangeName = pickString(mobulaData?.exchange, ["name"])
+              const exchangeLogo = pickString(mobulaData?.exchange, ["logo"])
+              const withExchange =
+                exchangeName || exchangeLogo
+                  ? { ...withSignals, exchangeName, exchangeLogo }
+                  : withSignals
 
-            // New token - add discovery timestamp
-            if (!seenCTOTokens.current.has(token.address)) {
-              seenCTOTokens.current.add(token.address)
-              return {
-                ...token,
-                timestamp: now.toISOString(),
-                updated: now.toISOString(),
+              return candidate.claimDate
+                ? { ...withExchange, updatedAt: candidate.claimDate }
+                : withExchange
+            } catch {
+              const fallback: TokenRowRuntime = {
+                address: candidate.tokenAddress,
+                name: candidate.name ?? "Unknown",
+                symbol: candidate.symbol ?? candidate.tokenAddress.slice(0, 6).toUpperCase(),
+                logo: candidate.logo ?? candidate.header ?? "/placeholder.svg",
+                price: Number(candidate.price ?? 0),
+                change5m: Number(candidate.change5m ?? 0),
+                change1h: Number(candidate.change1h ?? 0),
+                mc: Number(candidate.mc ?? 0),
+                liquidity: Number(candidate.liquidity ?? 0),
+                volume24h: Number(candidate.volume24h ?? 0),
+                updatedAt: candidate.claimDate ?? new Date().toISOString(),
+                signals: ["CTO"],
+                exchangeName: candidate.exchangeName,
+                exchangeLogo: candidate.exchangeLogo,
               }
+              return fallback
             }
+          }),
+        )
 
-            return token
-          })
+        if (aborted) return
 
-          setCtoTokensWithTime(tokensWithTime)
-          setCtoTokens(tokensWithTime)
-        } catch (error) {
+        const mapped = results
+          .filter((r): r is PromiseFulfilledResult<TokenRowRuntime> => r.status === "fulfilled")
+          .map((r) => r.value)
+
+        setCtoTokens(mapped)
+      } catch (error) {
+        if (!aborted) {
           console.error("[v0] Error loading CTO tokens:", error)
-        } finally {
-          if (isInitialLoad) {
-            setLoadingCTO(false)
-            isInitialLoad = false
-          }
+          setCtoTokens([])
         }
+      } finally {
+        if (!aborted) setLoadingCTO(false)
       }
-
-      loadCTO() // Initial load
-
-      // Poll every 10 seconds for new CTO data
-      const interval = setInterval(loadCTO, 10000)
-      return () => clearInterval(interval)
     }
-  }, [activeTab, ctoTokensWithTime, ctoRateLimited])
+
+    fetchCTO()
+
+    return () => {
+      aborted = true
+    }
+  }, [activeTab])
 
   useEffect(() => {
     if (activeTab !== "new") {
@@ -1007,6 +1198,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
       }
       setMobulaFetchStatus("idle")
       setMobulaLastMappedCount(null)
+      setMobulaTokens([])
       return
     }
 
@@ -1114,8 +1306,278 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     }
   }, [activeTab, launchpadFilter, mobulaRefreshTick])
 
+  const handleBoostFilterChange = (filter: string) => {
+    setBoostFilter(filter)
+    if (filter === boostFilter) {
+      setBoostRefreshTick((tick) => tick + 1)
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab !== "boost") return
+    let aborted = false
+
+    const fetchBoostTokens = async () => {
+      try {
+        setBoostError(null)
+        setBoostLoading(true)
+        setBoostTokens([])
+
+        const filterParam = boostFilter || "all"
+        const res = await fetch("/api/token-boosts/latest")
+        if (!res.ok) throw new Error(`Dexscreener boosts failed: ${res.status}`)
+        const json = await res.json()
+        const items: any[] = Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : []
+
+        const filterAmount = (() => {
+          if (!filterParam || filterParam === "all") return undefined
+          const parsed = Number.parseFloat(filterParam.replace(/x$/i, ""))
+          return Number.isFinite(parsed) ? parsed : undefined
+        })()
+
+        const candidates = items
+          .map((item) => ({
+            tokenAddress: item?.tokenAddress ?? item?.token_address,
+            header: item?.header ?? item?.icon ?? item?.image,
+            amount: parseBoostAmount(
+              pickNumber(item, ["amount", "totalAmount", "boostAmount"]) ??
+                pickString(item, ["amount", "totalAmount", "boostAmount"]),
+            ),
+          }))
+          .filter((it) => typeof it.tokenAddress === "string" && it.tokenAddress.length > 0)
+          .filter((it) => {
+            if (filterAmount === undefined) return true
+            if (typeof it.amount !== "number") return false
+            if (filterAmount === 500) return it.amount >= 500
+            return it.amount === filterAmount
+          })
+          .slice(0, 50)
+
+        const results = await Promise.allSettled(
+          candidates.map(async (candidate) => {
+            const mobulaRes = await fetch(`/api/mobula-token-details/${candidate.tokenAddress}`)
+            if (!mobulaRes.ok) throw new Error(`Mobula details failed: ${mobulaRes.status}`)
+            const mobulaJson = await mobulaRes.json()
+            const mapped = mapMobulaDetailsToTokenRow(candidate.tokenAddress, candidate.header, mobulaJson)
+            const withBoost = typeof candidate.amount === "number" ? { ...mapped, boostCount: candidate.amount } : mapped
+            const withSignals = { ...withBoost, signals: ["DEXBOOST_PAID"] as SignalType[] }
+
+            const mobulaData = mobulaJson?.data?.data ?? mobulaJson?.data ?? mobulaJson ?? {}
+            const exchangeName = pickString(mobulaData?.exchange, ["name"])
+            const exchangeLogo = pickString(mobulaData?.exchange, ["logo"])
+            return exchangeName || exchangeLogo
+              ? { ...withSignals, exchangeName, exchangeLogo }
+              : withSignals
+          }),
+        )
+
+        if (aborted) return
+
+        const mapped = results
+          .filter((r): r is PromiseFulfilledResult<TokenRowRuntime> => r.status === "fulfilled")
+          .map((r) => r.value)
+
+        setBoostTokens(mapped)
+      } catch (err: any) {
+        if (!aborted) {
+          setBoostError(typeof err?.message === "string" ? err.message : "Failed to load boost tokens")
+          setBoostTokens([])
+        }
+      } finally {
+        if (!aborted) setBoostLoading(false)
+      }
+    }
+
+    fetchBoostTokens()
+
+    return () => {
+      aborted = true
+    }
+  }, [activeTab, boostFilter, boostRefreshTick])
+
+  useEffect(() => {
+    if (activeTab !== "dexpaid") return
+    let aborted = false
+
+    const fetchDexPaid = async () => {
+      try {
+        setDexPaidError(null)
+        setDexPaidLoading(true)
+        setDexPaidTokens([])
+        const res = await fetch("/api/ads")
+        if (!res.ok) throw new Error(`Dexscreener ads failed: ${res.status}`)
+        const json = await res.json().catch(() => null)
+        const ads: any[] = Array.isArray(json) ? json : Array.isArray(json?.ads) ? json.ads : Array.isArray(json?.data) ? json.data : []
+
+        const candidates = ads
+          .map((ad) => ({
+            tokenAddress: ad?.tokenAddress ?? ad?.token_address,
+          }))
+          .filter((it) => typeof it.tokenAddress === "string" && it.tokenAddress.length > 0)
+          .slice(0, 50)
+
+        const results = await Promise.allSettled(
+          candidates.map(async (candidate) => {
+            const mobulaRes = await fetch(`/api/mobula-token-details/${candidate.tokenAddress}`)
+            if (!mobulaRes.ok) throw new Error(`Mobula details failed: ${mobulaRes.status}`)
+            const mobulaJson = await mobulaRes.json()
+            const mapped = mapMobulaDetailsToTokenRow(candidate.tokenAddress, undefined, mobulaJson)
+            const dexSignals: SignalType[] = []
+            if (typeof mapped.priceChange24h === "number" && mapped.priceChange24h > 0) dexSignals.push("PRICE_UP")
+            if (typeof mapped.mc === "number" && mapped.mc >= 1_000_000) dexSignals.push("KEY_MC")
+            const withSignals = dexSignals.length > 0 ? { ...mapped, signals: dexSignals } : mapped
+
+            const mobulaData = mobulaJson?.data?.data ?? mobulaJson?.data ?? mobulaJson ?? {}
+            const adPaidDate = pickString(mobulaData, [
+              "dexscreenerAdPaidDate",
+              "dexscreener_ad_paid_date",
+              "dexscreener_ad_paid_at",
+              "dexscreenerAdPaidAt",
+            ])
+
+            const exchangeName = pickString(mobulaData?.exchange, ["name"])
+            const exchangeLogo = pickString(mobulaData?.exchange, ["logo"])
+            const withExchange =
+              exchangeName || exchangeLogo
+                ? { ...withSignals, exchangeName, exchangeLogo }
+                : withSignals
+
+            return adPaidDate ? { ...withExchange, updatedAt: adPaidDate } : withExchange
+          }),
+        )
+
+        if (aborted) return
+
+        const mapped = results
+          .filter((r): r is PromiseFulfilledResult<TokenRowRuntime> => r.status === "fulfilled")
+          .map((r) => r.value)
+
+        setDexPaidTokens(mapped)
+      } catch (err: any) {
+        if (!aborted) {
+          setDexPaidError(typeof err?.message === "string" ? err.message : "Failed to load Dexpaid tokens")
+          setDexPaidTokens([])
+        }
+      } finally {
+        if (!aborted) setDexPaidLoading(false)
+      }
+    }
+
+    fetchDexPaid()
+
+    return () => {
+      aborted = true
+    }
+  }, [activeTab])
+
+  useEffect(() => {
+    if (activeTab !== "ads") return
+    let aborted = false
+
+    const fetchAds = async () => {
+      try {
+        setAdsError(null)
+        setAdsLoading(true)
+        setAdsTokens([])
+
+        const res = await fetch("/api/ads?chainId=solana")
+        if (!res.ok) throw new Error(`Dexscreener ads failed: ${res.status}`)
+        const json = await res.json().catch(() => null)
+        const ads: any[] = Array.isArray(json) ? json : Array.isArray(json?.ads) ? json.ads : Array.isArray(json?.data) ? json.data : []
+
+        const candidates = ads
+          .map((ad) => ({
+            tokenAddress: ad?.tokenAddress ?? ad?.token_address,
+            header: ad?.header ?? ad?.icon ?? ad?.image,
+            adType: pickString(ad, ["type"]),
+            adImpressions: pickNumber(ad, ["impressions"]),
+            adDurationHours: pickNumber(ad, ["durationHours", "duration_hours"]),
+            adDate: parseClaimDate(pickString(ad, ["date", "createdAt", "created_at"]) ?? ad?.date),
+          }))
+          .filter((it) => typeof it.tokenAddress === "string" && it.tokenAddress.length > 0)
+          .slice(0, 50)
+
+        const results = await Promise.allSettled(
+          candidates.map(async (candidate) => {
+            try {
+              const mobulaRes = await fetch(`/api/mobula-token-details/${candidate.tokenAddress}`)
+              if (!mobulaRes.ok) throw new Error(`Mobula details failed: ${mobulaRes.status}`)
+              const mobulaJson = await mobulaRes.json()
+              const mapped = mapMobulaDetailsToTokenRow(candidate.tokenAddress, candidate.header, mobulaJson)
+              const withSignals = { ...mapped, signals: ["DEXAD_PAID"] as SignalType[] }
+
+              const mobulaData = mobulaJson?.data?.data ?? mobulaJson?.data ?? mobulaJson ?? {}
+              const exchangeName = pickString(mobulaData?.exchange, ["name"])
+              const exchangeLogo = pickString(mobulaData?.exchange, ["logo"])
+
+              const withAds = {
+                ...withSignals,
+                adType: candidate.adType,
+                adImpressions: candidate.adImpressions,
+                adDurationHours: candidate.adDurationHours,
+                exchangeName,
+                exchangeLogo,
+              }
+              return candidate.adDate ? { ...withAds, updatedAt: candidate.adDate } : withAds
+            } catch {
+              const fallback: TokenRowRuntime = {
+                address: candidate.tokenAddress,
+                name: "Unknown",
+                symbol: candidate.tokenAddress.slice(0, 6).toUpperCase(),
+                logo: candidate.header ?? "/placeholder.svg",
+                price: 0,
+                change5m: 0,
+                change1h: 0,
+                mc: 0,
+                liquidity: 0,
+                volume24h: 0,
+                updatedAt: candidate.adDate ?? new Date().toISOString(),
+                signals: ["DEXAD_PAID"],
+                adType: candidate.adType,
+                adImpressions: candidate.adImpressions,
+                adDurationHours: candidate.adDurationHours,
+              }
+              return fallback
+            }
+          }),
+        )
+
+        if (aborted) return
+
+        const mapped = results
+          .filter((r): r is PromiseFulfilledResult<TokenRowRuntime> => r.status === "fulfilled")
+          .map((r) => r.value)
+
+        setAdsTokens(mapped)
+      } catch (err: any) {
+        if (!aborted) {
+          setAdsError(typeof err?.message === "string" ? err.message : "Failed to load ads")
+          setAdsTokens([])
+        }
+      } finally {
+        if (!aborted) setAdsLoading(false)
+      }
+    }
+
+    fetchAds()
+
+    return () => {
+      aborted = true
+    }
+  }, [activeTab])
+
+  const copyToClipboard = async (text: string, successMessage: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success(successMessage)
+    } catch (error) {
+      console.error("[v0] Copy failed:", error)
+      toast.error("Copy failed")
+    }
+  }
+
   const handleCopyWallet = (wallet: string) => {
-    navigator.clipboard.writeText(wallet)
+    copyToClipboard(wallet, "Copied wallet address")
     setTrackingData((prev) => ({
       ...prev,
       [wallet]: {
@@ -1355,7 +1817,11 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     return true // Default to showing all if no specific filter matches
   })
 
-  const newTabEffectiveTokens = useMemo(() => {
+  const richTabEffectiveTokens = useMemo(() => {
+    if (activeTab === "dexpaid") return dexPaidTokens as TokenRowRuntime[]
+    if (activeTab === "boost") return boostTokens as TokenRowRuntime[]
+    if (activeTab === "ads") return adsTokens as TokenRowRuntime[]
+    if (activeTab === "cto") return ctoTokens as TokenRowRuntime[]
     if (activeTab !== "new") return filteredTokens as TokenRowRuntime[]
 
     const source = mobulaTokens as TokenRowRuntime[]
@@ -1376,27 +1842,32 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
       sorted.sort((a, b) => ((a.priceChange1m ?? a.change5m) ?? 0) - ((b.priceChange1m ?? b.change5m) ?? 0))
     }
     return sorted
-  }, [activeTab, activePreset, launchpadFilter, mobulaTokens, initialTokens, filteredTokens])
+  }, [activeTab, activePreset, launchpadFilter, mobulaTokens, boostTokens, dexPaidTokens, adsTokens, ctoTokens, filteredTokens])
 
   const newTabScrollRef = useRef<HTMLDivElement | null>(null)
   const [newTabScrollTop, setNewTabScrollTop] = useState(0)
   const NEW_TAB_CONTAINER_HEIGHT = 600
   const NEW_TAB_ROW_HEIGHT = 96
 
-  const shouldVirtualizeNewTab = activeTab === "new" && newTabEffectiveTokens.length > 100
+  const shouldVirtualizeNewTab =
+    (activeTab === "new" || activeTab === "boost" || activeTab === "dexpaid" || activeTab === "cto" || activeTab === "ads") &&
+    richTabEffectiveTokens.length > 100
 
-  const effectiveFilteredTokensLength = activeTab === "new" ? newTabEffectiveTokens.length : filteredTokens.length
+  const effectiveFilteredTokensLength =
+    activeTab === "new" || activeTab === "boost" || activeTab === "dexpaid" || activeTab === "cto" || activeTab === "ads"
+      ? richTabEffectiveTokens.length
+      : filteredTokens.length
 
   const newTabWindowed = useMemo(() => {
     if (!shouldVirtualizeNewTab) {
       return {
         topPad: 0,
         bottomPad: 0,
-        visible: newTabEffectiveTokens,
+        visible: richTabEffectiveTokens,
       }
     }
 
-    const total = newTabEffectiveTokens.length
+    const total = richTabEffectiveTokens.length
     const overscan = 10
     const startIndex = clampNumber(Math.floor(newTabScrollTop / NEW_TAB_ROW_HEIGHT) - overscan, 0, total)
     const visibleCount = Math.ceil(NEW_TAB_CONTAINER_HEIGHT / NEW_TAB_ROW_HEIGHT) + overscan * 2
@@ -1404,9 +1875,9 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
 
     const topPad = startIndex * NEW_TAB_ROW_HEIGHT
     const bottomPad = (total - endIndex) * NEW_TAB_ROW_HEIGHT
-    const visible = newTabEffectiveTokens.slice(startIndex, endIndex)
+    const visible = richTabEffectiveTokens.slice(startIndex, endIndex)
     return { topPad, bottomPad, visible }
-  }, [shouldVirtualizeNewTab, newTabEffectiveTokens, newTabScrollTop])
+  }, [shouldVirtualizeNewTab, richTabEffectiveTokens, newTabScrollTop])
 
   return (
     <Card>
@@ -1460,6 +1931,9 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
             onClick={() => setActiveTab("signals")}
           >
             Signals
+            <Badge variant="secondary" className="text-[7px] sm:text-[8px] px-0.5 sm:px-1 py-0 h-3 leading-none">
+              soon
+            </Badge>
           </Button>
           <Button
             variant={activeTab === "kol" ? "default" : "outline"}
@@ -1468,6 +1942,9 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
             onClick={() => setActiveTab("kol")}
           >
             KOL
+            <Badge variant="secondary" className="text-[7px] sm:text-[8px] px-0.5 sm:px-1 py-0 h-3 leading-none">
+              soon
+            </Badge>
           </Button>
           <Button
             variant={activeTab === "prelaunch" ? "default" : "outline"}
@@ -1498,7 +1975,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                     className={`cursor-pointer text-xs sm:text-sm ${
                       boostFilter === filter ? "bg-amber-500 text-black hover:bg-amber-600" : "hover:bg-secondary"
                     }`}
-                    onClick={() => setBoostFilter(filter)}
+                    onClick={() => handleBoostFilterChange(filter)}
                   >
                     {filter}
                   </Badge>
@@ -1517,7 +1994,8 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                   ads: "New Ads",
                   signals: "Signals",
                 }
-                alert(`Snipe ${tabNames[activeTab]} - Feature coming soon!`)
+                setSnipeNotice(`Snipe ${tabNames[activeTab]} - Feature coming soon!`)
+                setSnipeDialogOpen(true)
               }}
             >
               <Target className="h-3 w-3 mr-1" />
@@ -1536,6 +2014,24 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
             </Button>
           </div>
         )}
+        <AlertDialog open={snipeDialogOpen} onOpenChange={setSnipeDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Coming soon</AlertDialogTitle>
+              <AlertDialogDescription>{snipeNotice ?? "Feature coming soon!"}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogAction
+                onClick={() => {
+                  setSnipeDialogOpen(false)
+                  setSnipeNotice(null)
+                }}
+              >
+                OK
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* New Coins filter tabs */}
         {activeTab === "new" && (
@@ -1621,92 +2117,9 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
         {activeTab === "boost" && <></>}
       </CardHeader>
       <CardContent className="p-0">
-        {activeTab === "kol" ? (
-          <div className="overflow-y-auto h-[600px] px-3 space-y-2 py-3">
-            {mockKOLCalls.map((call) => (
-              <div
-                key={call.id}
-                className="p-3 rounded-lg bg-secondary/30 hover:bg-secondary/50 border border-border transition-colors"
-              >
-                {/* Influencer & Token Header */}
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Image
-                      src={call.kolAvatar || "/placeholder.svg"}
-                      alt={call.kolName}
-                      width={32}
-                      height={32}
-                      className="rounded-full"
-                    />
-                    <div>
-                      <div className="flex items-center gap-1">
-                        <span className="font-semibold text-xs sm:text-sm">{call.kolName}</span>
-                        {call.kolVerified && <CheckCircle2 className="h-3 w-3 text-primary" />}
-                      </div>
-                      <p className="text-[10px] sm:text-sm text-muted-foreground">
-                        {call.kolHandle} · {formatNumber(call.kolFollowers)} followers
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Image
-                      src={call.token.logo || "/placeholder.svg"}
-                      alt={call.token.symbol}
-                      width={24}
-                      height={24}
-                      className="rounded-full"
-                    />
-                    <span className="font-semibold text-xs sm:text-sm">${call.token.symbol}</span>
-                  </div>
-                </div>
-
-                {/* Post Content */}
-                <p className="text-xs sm:text-sm text-foreground/90 mb-2 line-clamp-2">{call.postContent}</p>
-
-                {/* Token Info & Engagement */}
-                <div className="flex items-center justify-between text-[10px] sm:text-sm text-muted-foreground">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono">${formatPrice(call.token.price)}</span>
-                    <span className={`font-semibold ${call.token.change5m >= 0 ? "text-green-500" : "text-red-500"}`}>
-                      {call.token.change5m >= 0 ? "+" : ""}
-                      {call.token.change5m.toFixed(1)}%
-                    </span>
-                    <span>MC: {formatMarketCap(call.token.mc)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="flex items-center gap-0.5">
-                      <Heart className="h-3 w-3" /> {formatNumber(call.engagement.likes)}
-                    </span>
-                    <span className="flex items-center gap-0.5">
-                      <Repeat2 className="h-3 w-3" /> {formatNumber(call.engagement.retweets)}
-                    </span>
-                    <span className="flex items-center gap-0.5">
-                      <MessageCircle className="h-3 w-3" /> {formatNumber(call.engagement.replies)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-2 mt-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="flex-1 h-7 text-[10px] sm:text-sm bg-transparent"
-                    onClick={() => window.open(call.postUrl, "_blank")}
-                  >
-                    View Post
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="default"
-                    className="flex-1 h-7 text-[10px] sm:text-sm"
-                    onClick={() => (window.location.href = `/token/${call.token.address}`)}
-                  >
-                    Token Details
-                  </Button>
-                </div>
-              </div>
-            ))}
+        {activeTab === "signals" || activeTab === "kol" ? (
+          <div className="h-[600px] flex items-center justify-center text-sm text-muted-foreground">
+            Coming soon — still in development.
           </div>
         ) : activeTab === "prelaunch" ? (
           <>
@@ -1942,7 +2355,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
               </Table>
             </div>
           </>
-        ) : activeTab === "cto" ? (
+        ) : activeTab === "cto" && false ? (
           loadingCTO ? (
             <div className="max-h-[600px] overflow-auto">
               <Table>
@@ -2068,7 +2481,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                                 className="h-auto p-0 hover:bg-transparent"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  navigator.clipboard.writeText(token.address)
+                                  copyToClipboard(token.address, "Copied contract address")
                                 }}
                                 title="Copy CA"
                               >
@@ -2105,7 +2518,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                         </div>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-[9px] sm:text-[10px] py-2 px-4">
-                        {new Date(token.updatedAt).toLocaleTimeString()}
+                        {getTimeAgo(token.updatedAt)}
                       </TableCell>
                       <TableCell className="text-center py-2 px-4">
                         <div className="flex justify-center gap-1">
@@ -2145,7 +2558,51 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
         ) : (
           <>
             {effectiveFilteredTokensLength === 0 ? (
-              activeTab === "new" && mobulaFetchStatus === "ready" && !mobulaRateLimited && mobulaLastMappedCount === 0 ? (
+              activeTab === "boost" && boostLoading ? (
+                <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
+                  Loading boost tokens…
+                </div>
+              ) : activeTab === "ads" && adsLoading ? (
+                <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
+                  Loading ads…
+                </div>
+              ) : activeTab === "cto" && loadingCTO ? (
+                <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
+                  Loading CTO tokens…
+                </div>
+              ) : activeTab === "cto" && ctoRateLimited ? (
+                <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
+                  CTO data is temporarily rate limited. Please try again later.
+                </div>
+              ) : activeTab === "boost" && !boostLoading && !boostError ? (
+                <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
+                  No boost data available for this filter.
+                </div>
+              ) : activeTab === "ads" && !adsLoading && !adsError ? (
+                <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
+                  No ads available right now.
+                </div>
+              ) : activeTab === "cto" && !loadingCTO ? (
+                <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
+                  No community takeovers available.
+                </div>
+              ) : activeTab === "dexpaid" && dexPaidLoading ? (
+                <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
+                  Loading dexpaid tokens…
+                </div>
+              ) : activeTab === "boost" && boostError ? (
+                <div className="h-[600px] flex items-center justify-center text-red-500 text-sm">
+                  {boostError}
+                </div>
+              ) : activeTab === "ads" && adsError ? (
+                <div className="h-[600px] flex items-center justify-center text-red-500 text-sm">
+                  {adsError}
+                </div>
+              ) : activeTab === "dexpaid" && dexPaidError ? (
+                <div className="h-[600px] flex items-center justify-center text-red-500 text-sm">
+                  {dexPaidError}
+                </div>
+              ) : activeTab === "new" && mobulaFetchStatus === "ready" && !mobulaRateLimited && mobulaLastMappedCount === 0 ? (
                 <div className="h-[600px] overflow-auto p-4">
                   <Empty className="border-border bg-secondary/20">
                     <EmptyHeader>
@@ -2178,7 +2635,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                         <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">MC</TableHead>
                         <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Price</TableHead>
                         <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                          {activeTab === "new" ? "1m" : "5m"}
+                          {activeTab === "new" || activeTab === "dexpaid" ? "1m" : "5m"}
                         </TableHead>
                         <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Vol(24h)</TableHead>
                         <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Signals</TableHead>
@@ -2223,7 +2680,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                   className="h-[600px] overflow-auto [&_[data-slot=table-container]]:overflow-x-visible"
                   ref={newTabScrollRef}
                   onScroll={(e) => {
-                    if (activeTab === "new" && shouldVirtualizeNewTab) {
+                    if ((activeTab === "new" || activeTab === "boost" || activeTab === "dexpaid" || activeTab === "cto" || activeTab === "ads") && shouldVirtualizeNewTab) {
                       const target = e.currentTarget
                       setNewTabScrollTop(target.scrollTop)
                     }
@@ -2259,13 +2716,18 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {activeTab === "new" && shouldVirtualizeNewTab && newTabWindowed.topPad > 0 && (
+                      {(activeTab === "new" || activeTab === "boost" || activeTab === "dexpaid" || activeTab === "cto" || activeTab === "ads") &&
+                        shouldVirtualizeNewTab &&
+                        newTabWindowed.topPad > 0 && (
                         <TableRow className="border-border hover:bg-transparent">
                           <TableCell colSpan={8} style={{ height: newTabWindowed.topPad }} className="p-0" />
                         </TableRow>
                       )}
 
-                      {(activeTab === "new" ? newTabWindowed.visible : (filteredTokens as TokenRowRuntime[])).map((token) => {
+                      {((activeTab === "new" || activeTab === "boost" || activeTab === "dexpaid" || activeTab === "cto" || activeTab === "ads")
+                        ? newTabWindowed.visible
+                        : (filteredTokens as TokenRowRuntime[])
+                      ).map((token, index) => {
                         const rowClassName = `cursor-pointer hover:bg-secondary/50 transition-colors border-border ${
                           newestTokenAddress === token.address ? "animate-slide-in" : ""
                         } ${
@@ -2276,7 +2738,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                           activeTab === "new" && (token as TokenRowRuntime).momentumState === "COOLING" ? "opacity-70" : ""
                         } ${activeTab === "new" && (token as TokenRowRuntime).riskLevel === "HIGH" ? "border-l-4 border-l-amber-500" : ""}`
 
-                        if (activeTab !== "new") {
+                        if (activeTab !== "new" && activeTab !== "boost" && activeTab !== "dexpaid" && activeTab !== "cto" && activeTab !== "ads") {
                           return (
                             <TableRow
                               key={token.address}
@@ -2304,7 +2766,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                                         className={`p-0 hover:bg-primary/20 ${activeTab === "new" ? "h-11 w-11 sm:h-3 sm:w-3" : "h-3 w-3"}`}
                                         onClick={(e) => {
                                           e.stopPropagation()
-                                          navigator.clipboard.writeText(token.address)
+                                          copyToClipboard(token.address, "Copied contract address")
                                         }}
                                         title="Copy Contract Address"
                                         aria-label="Copy contract address"
@@ -2430,7 +2892,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                         }
 
                         return (
-                          <Fragment key={token.address}>
+                          <Fragment key={`${token.address}-${activeTab}-${index}`}>
                             <TableRow
                               onClick={() => handleTokenClick(token)}
                               className={rowClassName}
@@ -2446,7 +2908,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                                       className="rounded-md object-cover"
                                     />
                                     <div className="flex flex-col">
-                                        <div className="flex items-center gap-1.5 min-w-0">
+                                        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                                           {activeTab === "new" && (() => {
                                             const runtime = token as TokenRowRuntime
                                             const iconKey = normalizeLaunchpadIconKeyFromSource(runtime.source)
@@ -2466,10 +2928,34 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                                           <span className="font-semibold text-foreground text-xs sm:text-sm truncate max-w-[160px]">
                                             {token.name}
                                           </span>
+                                          {(activeTab === "dexpaid" || activeTab === "boost" || activeTab === "cto" || activeTab === "ads") && ((token as TokenRowRuntime).exchangeName || (token as TokenRowRuntime).exchangeLogo) && (
+                                            <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] text-muted-foreground">
+                                              {(token as TokenRowRuntime).exchangeLogo && (
+                                                <Image
+                                                  src={(token as TokenRowRuntime).exchangeLogo as string}
+                                                  alt={(token as TokenRowRuntime).exchangeName || "Exchange"}
+                                                  width={14}
+                                                  height={14}
+                                                  className="rounded"
+                                                />
+                                              )}
+                                              {(token as TokenRowRuntime).exchangeName && (
+                                                <span className="truncate max-w-[120px]">{(token as TokenRowRuntime).exchangeName}</span>
+                                              )}
+                                            </span>
+                                          )}
                                         </div>
                                       <div className="flex items-center gap-1">
                                         <span className="text-[10px] sm:text-xs text-muted-foreground">{token.symbol}</span>
-                                        {activeTab === "new" && (token as TokenRowRuntime).tradeDecision && (
+                                        {activeTab === "boost" && (
+                                          <Badge
+                                            variant="outline"
+                                            className="text-[8px] sm:text-[9px] px-1.5 py-0 h-4 leading-none bg-amber-500/15 text-amber-700 border-amber-500/40"
+                                          >
+                                            Dexpaid
+                                          </Badge>
+                                        )}
+                                        {(activeTab === "new" || activeTab === "dexpaid") && (token as TokenRowRuntime).tradeDecision && (
                                           <span
                                             className={`inline-flex items-center rounded border px-1.5 py-0 h-4 leading-none text-[8px] sm:text-[9px] ${getDecisionClass(
                                               (token as TokenRowRuntime).tradeDecision,
@@ -2480,7 +2966,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                                             {(token as TokenRowRuntime).tradeDecision}
                                           </span>
                                         )}
-                                        {activeTab === "new" && (token as TokenRowRuntime).tradeModeFit && (
+                                        {(activeTab === "new" || activeTab === "dexpaid") && (token as TokenRowRuntime).tradeModeFit && (
                                           <Badge
                                             variant="secondary"
                                             className="text-[8px] sm:text-[9px] px-1.5 py-0 h-4 leading-none"
@@ -2489,7 +2975,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                                             {(token as TokenRowRuntime).tradeModeFit}
                                           </Badge>
                                         )}
-                                        {activeTab === "new" && (token as TokenRowRuntime).riskLevel && (
+                                        {(activeTab === "new" || activeTab === "dexpaid") && (token as TokenRowRuntime).riskLevel && (
                                           <span
                                             className={`inline-flex items-center rounded border px-1.5 py-0 h-4 leading-none text-[8px] sm:text-[9px] ${getRiskBadgeClass(
                                               (token as TokenRowRuntime).riskLevel,
@@ -2500,7 +2986,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                                             {(token as TokenRowRuntime).riskLevel}
                                           </span>
                                         )}
-                                        {activeTab === "new" && (token as TokenRowRuntime).momentumState && (
+                                        {(activeTab === "new" || activeTab === "dexpaid") && (token as TokenRowRuntime).momentumState && (
                                           <span
                                             className={`inline-flex items-center rounded border px-1.5 py-0 h-4 leading-none text-[8px] sm:text-[9px] ${getMomentumBadgeClass(
                                               (token as TokenRowRuntime).momentumState,
@@ -2521,7 +3007,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                                           className={`p-0 hover:bg-primary/20 ${activeTab === "new" ? "h-11 w-11 sm:h-3 sm:w-3" : "h-3 w-3"}`}
                                           onClick={(e) => {
                                             e.stopPropagation()
-                                            navigator.clipboard.writeText(token.address)
+                                            copyToClipboard(token.address, "Copied contract address")
                                           }}
                                           title="Copy Contract Address"
                                           aria-label="Copy contract address"
@@ -2564,7 +3050,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                               </span>
                                 )
                               })()}
-                              {activeTab === "new" && typeof (token as TokenRowRuntime).priceChange24h === "number" && (
+                              {(activeTab === "new" || activeTab === "dexpaid") && typeof (token as TokenRowRuntime).priceChange24h === "number" && (
                                 <span
                                   className={`mt-1 text-[8px] sm:text-[9px] ${
                                     ((token as TokenRowRuntime).priceChange24h ?? 0) >= 0
@@ -2583,7 +3069,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                           <TableCell className="text-right font-mono text-[10px] sm:text-xs py-2 px-4">
                             <div className="flex flex-col items-end leading-none">
                               <span>{formatNumber(token.volume24h)}</span>
-                              {activeTab === "new" && token.mc > 0 && (
+                              {(activeTab === "new" || activeTab === "dexpaid") && token.mc > 0 && (
                                 <span
                                   className="mt-1 text-[8px] sm:text-[9px] text-muted-foreground"
                                   title={`Vol/MC: ${(token.volume24h / Math.max(token.mc, 1)).toFixed(2)}x`}
@@ -2675,6 +3161,21 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                               </div>
 
                               <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-[9px] sm:text-[10px] text-muted-foreground">
+                                {activeTab === "ads" && (token as TokenRowRuntime).adType && (
+                                  <div title="Ad type" aria-label="Ad type">
+                                    <span className="text-amber-500">📣</span> Type {(token as TokenRowRuntime).adType}
+                                  </div>
+                                )}
+                                {activeTab === "ads" && typeof (token as TokenRowRuntime).adImpressions === "number" && (
+                                  <div title="Ad impressions" aria-label="Ad impressions">
+                                    <span className="text-amber-500">👁️</span> Impressions {formatCount((token as TokenRowRuntime).adImpressions ?? 0)}
+                                  </div>
+                                )}
+                                {activeTab === "ads" && typeof (token as TokenRowRuntime).adDurationHours === "number" && (
+                                  <div title="Ad duration" aria-label="Ad duration">
+                                    <span className="text-amber-500">⏱️</span> Duration {(token as TokenRowRuntime).adDurationHours?.toFixed(0)}h
+                                  </div>
+                                )}
                                 {typeof (token as TokenRowRuntime).buyCount === "number" &&
                                   typeof (token as TokenRowRuntime).sellCount === "number" && (
                                     <div title="Buy Pressure (buys vs sells)" aria-label="Buy pressure">
@@ -2765,7 +3266,9 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                         )
                       })}
 
-                      {activeTab === "new" && shouldVirtualizeNewTab && newTabWindowed.bottomPad > 0 && (
+                      {(activeTab === "new" || activeTab === "boost" || activeTab === "dexpaid" || activeTab === "cto" || activeTab === "ads") &&
+                        shouldVirtualizeNewTab &&
+                        newTabWindowed.bottomPad > 0 && (
                         <TableRow className="border-border hover:bg-transparent">
                           <TableCell colSpan={8} style={{ height: newTabWindowed.bottomPad }} className="p-0" />
                         </TableRow>

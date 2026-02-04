@@ -76,7 +76,8 @@ export async function fetchPumpFunTokens(): Promise<TokenRow[]> {
     console.log("[v0] API response status:", response.status)
 
     if (!response.ok) {
-      throw new Error(`API request failed: ${response.status}`)
+      console.warn("[v0] Trending API request failed:", response.status)
+      return []
     }
 
     const data = await response.json()
@@ -195,6 +196,30 @@ export interface CTOToken {
   volume24h?: number
   priceChange5m?: number
   priceChange1h?: number
+  claimDate?: string | number
+}
+
+const parseClaimDateToIso = (value?: string | number) => {
+  if (value === undefined || value === null) return undefined
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ms = value < 1_000_000_000_000 ? value * 1000 : value
+    const date = new Date(ms)
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (!trimmed) return undefined
+    const numeric = Number(trimmed)
+    if (Number.isFinite(numeric)) {
+      const ms = numeric < 1_000_000_000_000 ? numeric * 1000 : numeric
+      const date = new Date(ms)
+      return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+    }
+    const ms = Date.parse(trimmed)
+    if (!Number.isFinite(ms)) return undefined
+    return new Date(ms).toISOString()
+  }
+  return undefined
 }
 
 export function mapCTOTokenToTokenRow(ctoToken: CTOToken): TokenRow {
@@ -205,6 +230,7 @@ export function mapCTOTokenToTokenRow(ctoToken: CTOToken): TokenRow {
   const mc = ctoToken.marketCap || 0
   const change5m = ctoToken.priceChange5m || 0
   const change1h = ctoToken.priceChange1h || 0
+  const claimDateIso = parseClaimDateToIso(ctoToken.claimDate)
 
   const signals: SignalType[] = ["CTO"]
 
@@ -219,7 +245,7 @@ export function mapCTOTokenToTokenRow(ctoToken: CTOToken): TokenRow {
     mc: mc,
     liquidity: ctoToken.liquidity || 0,
     volume24h: ctoToken.volume24h || 0,
-    updatedAt: new Date().toISOString(),
+    updatedAt: claimDateIso ?? new Date().toISOString(),
     signals: signals,
     boostCount: undefined,
     launchpad: undefined,

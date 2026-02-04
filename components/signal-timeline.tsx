@@ -12,10 +12,10 @@ interface SignalTimelineProps {
   analyzerContent?: React.ReactNode
 }
 
-type FilterType = "all" | "paid" | "analyzer"
+type FilterType = "paid" | "analyzer"
 
 export function SignalTimeline({ events, analyzerContent }: SignalTimelineProps) {
-  const [filter, setFilter] = useState<FilterType>("all")
+  const [filter, setFilter] = useState<FilterType>(analyzerContent ? "analyzer" : "paid")
 
   const filteredEvents = useMemo(() => {
     let filtered = [...events]
@@ -50,18 +50,17 @@ export function SignalTimeline({ events, analyzerContent }: SignalTimelineProps)
   }
 
   return (
-    <Card>
+    <Card className="h-fit" title="Signal Timeline: history of signals and related analysis for this token.">
       <CardHeader>
         <CardTitle>Signal Timeline</CardTitle>
         <Tabs value={filter} onValueChange={(v) => setFilter(v as FilterType)} className="mt-3">
-          <TabsList className={analyzerContent ? "grid w-full grid-cols-3" : "grid w-full grid-cols-2"}>
-            <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
+          <TabsList className={analyzerContent ? "grid w-full grid-cols-2" : "grid w-full grid-cols-1"}>
             <TabsTrigger value="paid" className="text-xs">Paid</TabsTrigger>
             {analyzerContent ? <TabsTrigger value="analyzer" className="text-xs">Analyzer</TabsTrigger> : null}
           </TabsList>
         </Tabs>
       </CardHeader>
-      <CardContent>
+      <CardContent className="max-h-[680px] overflow-y-auto pr-2">
         {filter === "analyzer" && analyzerContent ? (
           analyzerContent
         ) : (

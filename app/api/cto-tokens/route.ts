@@ -23,10 +23,19 @@ export async function GET() {
     }
 
     const ctoData = await response.json()
-    console.log("[v0] CTO API returned", ctoData.length, "tokens")
+    const ctoList: any[] = Array.isArray(ctoData)
+      ? ctoData
+      : Array.isArray(ctoData?.data)
+        ? ctoData.data
+        : Array.isArray(ctoData?.result)
+          ? ctoData.result
+          : Array.isArray(ctoData?.tokens)
+            ? ctoData.tokens
+            : []
+    console.log("[v0] CTO API returned", ctoList.length, "tokens")
 
     const tokensWithData = await Promise.all(
-      ctoData.slice(0, 20).map(async (ctoToken: any) => {
+      ctoList.slice(0, 20).map(async (ctoToken: any) => {
         try {
           // Fetch token details from DexScreener
           const tokenResponse = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${ctoToken.tokenAddress}`, {

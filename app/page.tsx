@@ -6,12 +6,14 @@ import { TokenTable } from "@/components/token-table"
 import { TokenTrending } from "@/components/live-signal-feed"
 import { DexpathInfo } from "@/components/dexpath-info"
 import { ChevronsLeft, Search } from "lucide-react"
+import { Copy } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import type { TokenRow } from "@/lib/mock"
 import { FeaturedAdToken } from "@/components/featured-ad-token"
 import { CreateAdDialog } from "@/components/create-ad-dialog"
 import { Button } from "@/components/ui/button"
-import { formatNumber } from "@/lib/format"
+import { Badge } from "@/components/ui/badge"
+import { formatCount, formatNumber } from "@/lib/format"
 import { useRouter } from "next/navigation"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -28,6 +30,9 @@ export default function Home() {
   const [historyTokens, setHistoryTokens] = useState<SearchToken[]>([])
   const searchDebounceRef = useRef<number | null>(null)
   const searchRequestIdRef = useRef(0)
+  const searchAbortRef = useRef<AbortController | null>(null)
+  const searchCacheRef = useRef<Map<string, { ts: number; data: SearchToken[] }>>(new Map())
+  const SEARCH_CACHE_TTL = 60_000
 
   type SearchToken = {
     address: string
@@ -38,6 +43,16 @@ export default function Home() {
     marketCap?: number
     liquidity?: number
     volume24h?: number
+    createdAt?: string
+    bondingPercentage?: number
+    exchangeName?: string
+    exchangeLogo?: string
+    snipersCount?: number
+    bundlersCount?: number
+    insidersCount?: number
+    smartTradersCount?: number
+    proTradersCount?: number
+    freshTradersCount?: number
     raw?: any
   }
 
@@ -63,6 +78,207 @@ export default function Home() {
     return undefined
   }
 
+  const pickString = (source: any, keys: string[]) => {
+    for (const key of keys) {
+      const value = key.split(".").reduce((acc, part) => (acc ? acc[part] : undefined), source)
+      if (typeof value === "string" && value.trim().length > 0) return value.trim()
+    }
+    return undefined
+  }
+
+  const normalizeDate = (value: unknown) => {
+    if (value === undefined || value === null) return undefined
+    if (typeof value === "number" && Number.isFinite(value)) {
+      const ms = value < 1_000_000_000_000 ? value * 1000 : value
+      const date = new Date(ms)
+      return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim()
+      if (!trimmed) return undefined
+      const numeric = Number(trimmed)
+      if (Number.isFinite(numeric)) {
+        const ms = numeric < 1_000_000_000_000 ? numeric * 1000 : numeric
+        const date = new Date(ms)
+        return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+      }
+      const ms = Date.parse(trimmed)
+      if (!Number.isFinite(ms)) return undefined
+      return new Date(ms).toISOString()
+    }
+    return undefined
+  }
+
+  const formatAge = (createdAt?: string) => {
+    if (!createdAt) return "-"
+    const ms = Date.parse(createdAt)
+    if (!Number.isFinite(ms)) return "-"
+    const diff = Date.now() - ms
+    const minutes = Math.floor(diff / 60000)
+    if (minutes < 1) return "just now"
+    if (minutes < 60) return `${minutes}m`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h`
+    return `${Math.floor(hours / 24)}d`
+  }
+
+  const formatBonding = (value?: number) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "-"
+    const pct = value <= 1 ? value * 100 : value
+    return `${Math.max(0, Math.min(100, Math.round(pct)))}%`
+  }
+
+  const renderExchangeBadge = (token: SearchToken) => {
+    if (!token.exchangeName && !token.exchangeLogo) return null
+    return (
+      <Badge variant="secondary" className="h-5 px-2 text-[9px] font-medium gap-1">
+        {token.exchangeLogo && (
+          <img
+            src={token.exchangeLogo}
+            alt={token.exchangeName || "Exchange"}
+            className="h-3 w-3 rounded-sm object-cover"
+          />
+        )}
+        <span>{token.exchangeName || "Exchange"}</span>
+      </Badge>
+    )
+  }
+
+  const copyAddress = async (address: string) => {
+    try {
+      await navigator.clipboard.writeText(address)
+    } catch (error) {
+      console.warn("[v0] Failed to copy address:", error)
+    }
+  }
+
+  const formatAddress = (address: string) => {
+    if (!address) return "-"
+    if (address.length <= 10) return address
+    return `${address.slice(0, 4)}…${address.slice(-4)}`
+  }
+
+  const renderTokenMeta = (token: SearchToken) => {
+    const age = token.createdAt ? formatAge(token.createdAt) : "-"
+    const bondedRaw =
+      token.raw?.bonded ??
+      token.raw?.isBonded ??
+      token.raw?.data?.bonded ??
+      token.raw?.data?.isBonded
+    const isBonded = bondedRaw === true || bondedRaw === "true" || bondedRaw === 1 || bondedRaw === "1"
+    const bondingRaw = isBonded
+      ? 100
+      : typeof token.bondingPercentage === "number"
+        ? token.bondingPercentage
+        : pickNumber(token.raw, [
+            "bondingPercentage",
+            "bonding_percent",
+            "bondingProgress",
+            "bonding_progress",
+            "data.bondingPercentage",
+            "data.bonding_percent",
+            "token.bondingPercentage",
+          ])
+    const bonding = typeof bondingRaw === "number" ? formatBonding(bondingRaw) : "-"
+    const showAge = age !== "-"
+    const showBonding = bonding !== "-"
+
+    const countItems = [
+      { label: "Snipers", value: token.snipersCount },
+      { label: "Bundlers", value: token.bundlersCount },
+      { label: "Insiders", value: token.insidersCount },
+      { label: "Smart", value: token.smartTradersCount },
+      { label: "Pro", value: token.proTradersCount },
+      { label: "Fresh", value: token.freshTradersCount },
+    ].filter((item) => typeof item.value === "number")
+
+    const metricItems = [
+      { label: "MC", value: token.marketCap },
+      { label: "V", value: token.volume24h },
+      { label: "L", value: token.liquidity },
+    ].filter((item) => typeof item.value === "number")
+
+    const dexListed =
+      token.raw?.dexscreenerListed ??
+      token.raw?.dexScreenerListed ??
+      token.raw?.data?.dexscreenerListed ??
+      token.raw?.data?.dexScreenerListed
+    const dexAdPaid =
+      token.raw?.dexscreenerAdPaid ??
+      token.raw?.dexScreenerAdPaid ??
+      token.raw?.data?.dexscreenerAdPaid ??
+      token.raw?.data?.dexScreenerAdPaid
+    const dexSocialPaid =
+      token.raw?.dexscreenerSocialPaid ??
+      token.raw?.dexScreenerSocialPaid ??
+      token.raw?.data?.dexscreenerSocialPaid ??
+      token.raw?.data?.dexScreenerSocialPaid
+    const dexBoosted =
+      token.raw?.dexscreenerBoosted ??
+      token.raw?.dexScreenerBoosted ??
+      token.raw?.data?.dexscreenerBoosted ??
+      token.raw?.data?.dexScreenerBoosted
+    const boostedAmountRaw =
+      token.raw?.dexscreenerBoostedAmount ??
+      token.raw?.dexScreenerBoostedAmount ??
+      token.raw?.data?.dexscreenerBoostedAmount ??
+      token.raw?.data?.dexScreenerBoostedAmount
+    const boostedAmount = typeof boostedAmountRaw === "string" ? boostedAmountRaw : Number.isFinite(Number(boostedAmountRaw)) ? `${boostedAmountRaw}` : undefined
+
+    const dexBadges: Array<{ key: string; label: string; variant?: "secondary" | "default" | "outline" }> = []
+    if (dexListed === true || dexListed === "true") dexBadges.push({ key: "dex-listed", label: "Dex Listed" })
+    if (dexAdPaid === true || dexAdPaid === "true") dexBadges.push({ key: "dex-ad", label: "Dex Ad Paid" })
+    if (dexSocialPaid === true || dexSocialPaid === "true") dexBadges.push({ key: "dex-social", label: "Dex Social Paid" })
+    if (dexBoosted === true || dexBoosted === "true") dexBadges.push({ key: "dex-boosted", label: "Dex Boosted" })
+
+    if (!showAge && !showBonding && countItems.length === 0 && metricItems.length === 0 && dexBadges.length === 0) return null
+
+    return (
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        {metricItems.map((item) => (
+          <Badge key={item.label} variant="secondary" className="h-5 px-2 text-[9px] font-medium">
+            {item.label} {formatMetric(item.value as number)}
+          </Badge>
+        ))}
+        {dexBadges.map((item) => (
+          <Badge key={item.key} variant="secondary" className="h-5 px-2 text-[9px] font-medium">
+            ✅ {item.label}
+          </Badge>
+        ))}
+        {(dexBoosted === true || dexBoosted === "true") && boostedAmount && (
+          <Badge className="h-5 px-2 text-[9px] font-medium bg-yellow-400/90 text-black hover:bg-yellow-400">
+            ⚡ {boostedAmount}X
+          </Badge>
+        )}
+        {showAge && (
+          <Badge variant="secondary" className="h-5 px-2 text-[9px] font-medium">
+            ⏱️ Age {age}
+          </Badge>
+        )}
+        {showBonding && (
+          <Badge variant="secondary" className="h-5 px-2 text-[9px] font-medium">
+            🧩 Bonding {bonding}
+          </Badge>
+        )}
+        {countItems.map((item) => (
+          <Badge key={item.label} variant="secondary" className="h-5 px-2 text-[9px] font-medium">
+            {item.label === "Snipers"
+              ? "🎯"
+              : item.label === "Bundlers"
+                ? "📦"
+                : item.label === "Insiders"
+                  ? "🕵️"
+                  : item.label === "Smart"
+                    ? "🧠"
+                    : item.label === "Pro"
+                      ? "⭐"
+                      : "🆕"} {item.label} {formatCount(item.value as number)}
+          </Badge>
+        ))}
+      </div>
+    )
+  }
+
   useEffect(() => {
     if (typeof window === "undefined") return
     try {
@@ -79,7 +295,12 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-    if (!searchOpen) return
+    if (!searchOpen) {
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort()
+      }
+      return
+    }
 
     const query = searchQuery.trim()
     if (query.length < 2) {
@@ -93,14 +314,32 @@ export default function Home() {
       window.clearTimeout(searchDebounceRef.current)
     }
 
+    const cacheKey = query.toLowerCase()
+    const cached = searchCacheRef.current.get(cacheKey)
+    if (cached && Date.now() - cached.ts < SEARCH_CACHE_TTL) {
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort()
+      }
+      setSearchResults(cached.data)
+      setSearchLoading(false)
+      setSearchError(null)
+      return
+    }
+
     searchDebounceRef.current = window.setTimeout(async () => {
       const requestId = ++searchRequestIdRef.current
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort()
+      }
+      const controller = new AbortController()
+      searchAbortRef.current = controller
       setSearchLoading(true)
       setSearchError(null)
 
       try {
         const response = await fetch(`/api/mobula-fast-search?input=${encodeURIComponent(query)}`, {
           cache: "no-store",
+          signal: controller.signal,
         })
 
         if (!response.ok) {
@@ -131,6 +370,33 @@ export default function Home() {
                 const marketCap = pickNumber(item, ["marketCapUSD", "marketcapUSD", "market_cap_usd"])
                 const volume24h = pickNumber(item, ["volume24usd", "volume24Usd", "volume_24h_usd"])
                 const liquidity = pickNumber(item, ["liquidityUSD", "liquidityUsd", "liquidity_usd"])
+                const createdAt =
+                  normalizeDate(item?.createdAt) ??
+                  normalizeDate(item?.created_at) ??
+                  normalizeDate(item?.createdAtMs) ??
+                  normalizeDate(item?.createdAtTs) ??
+                  normalizeDate(item?.created_at_ts)
+
+                const bondingPercentage = pickNumber(item, [
+                  "bondingPercentage",
+                  "bonding_percent",
+                  "bondingProgress",
+                  "bonding_progress",
+                ])
+
+                const exchangeName =
+                  pickString(item, ["exchange.name", "exchangeName", "exchange_name"]) ??
+                  pickString(item?.exchange, ["name"])
+                const exchangeLogo =
+                  pickString(item, ["exchange.logo", "exchangeLogo", "exchange_logo"]) ??
+                  pickString(item?.exchange, ["logo"])
+
+                const snipersCount = pickNumber(item, ["snipersCount", "snipers_count", "snipers"])
+                const bundlersCount = pickNumber(item, ["bundlersCount", "bundlers_count", "bundlers"])
+                const insidersCount = pickNumber(item, ["insidersCount", "insiders_count", "insiders"])
+                const smartTradersCount = pickNumber(item, ["smartTradersCount", "smart_traders_count", "smartTraders"])
+                const proTradersCount = pickNumber(item, ["proTradersCount", "pro_traders_count", "proTraders"])
+                const freshTradersCount = pickNumber(item, ["freshTradersCount", "fresh_traders_count", "freshTraders"])
 
                 return {
                   address,
@@ -141,6 +407,16 @@ export default function Home() {
                   marketCap,
                   liquidity,
                   volume24h,
+                  createdAt,
+                  bondingPercentage,
+                  exchangeName: exchangeName ?? undefined,
+                  exchangeLogo: exchangeLogo ?? undefined,
+                  snipersCount,
+                  bundlersCount,
+                  insidersCount,
+                  smartTradersCount,
+                  proTradersCount,
+                  freshTradersCount,
                   raw: item,
                 }
               })
@@ -148,9 +424,11 @@ export default function Home() {
           : []
 
         if (requestId === searchRequestIdRef.current) {
+          searchCacheRef.current.set(cacheKey, { ts: Date.now(), data: normalized })
           setSearchResults(normalized)
         }
       } catch (error: any) {
+        if (error?.name === "AbortError") return
         if (requestId === searchRequestIdRef.current) {
           console.error("[v0] Search failed:", error)
           setSearchError("Failed to fetch tokens")
@@ -166,6 +444,9 @@ export default function Home() {
     return () => {
       if (searchDebounceRef.current) {
         window.clearTimeout(searchDebounceRef.current)
+      }
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort()
       }
     }
   }, [searchQuery, searchOpen])
@@ -261,10 +542,10 @@ export default function Home() {
                     }
                   }}
                 >
-                  <DialogContent className="max-w-3xl p-0 overflow-hidden">
+                  <DialogContent className="w-[calc(100vw-3rem)] max-w-none h-[calc(100vh-8rem)] max-h-none p-0 overflow-hidden rounded-xl flex flex-col">
                     <DialogTitle className="sr-only">Token search</DialogTitle>
                     <div className="border-b border-border p-4 space-y-3">
-                      <div className="text-sm text-muted-foreground">Search by name, ticker, CA, KOL or X handle</div>
+                      <div className="text-sm text-muted-foreground">Search by name or address</div>
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
@@ -277,7 +558,7 @@ export default function Home() {
                         />
                       </div>
                     </div>
-                    <div className="max-h-[420px] overflow-y-auto p-2">
+                    <div className="flex-1 overflow-y-auto p-2">
                       {searchQuery.trim().length === 0 ? (
                         <div className="space-y-2">
                           <div className="flex items-center justify-between px-2">
@@ -290,15 +571,6 @@ export default function Home() {
                                   <TableRow className="hover:bg-transparent border-border">
                                     <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                                       Token
-                                    </TableHead>
-                                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                                      MC
-                                    </TableHead>
-                                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                                      V
-                                    </TableHead>
-                                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                                      L
                                     </TableHead>
                                   </TableRow>
                                 </TableHeader>
@@ -317,23 +589,33 @@ export default function Home() {
                                             className="h-8 w-8 rounded-full object-cover"
                                           />
                                           <div className="min-w-0">
-                                            <div className="text-[11px] sm:text-xs font-semibold truncate">
-                                              {token.name || token.symbol || "Unknown"}
+                                            <div className="text-[11px] sm:text-xs font-semibold truncate flex items-center gap-1">
+                                              <span className="truncate">{token.name || token.symbol || "Unknown"}</span>
+                                              {renderExchangeBadge(token)}
                                             </div>
                                             <div className="text-[10px] text-muted-foreground truncate">
                                               {token.symbol || "???"}
                                             </div>
+                                            <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+                                              <span className="truncate max-w-[220px] sm:max-w-[260px]">
+                                                {formatAddress(token.address)}
+                                              </span>
+                                              <button
+                                                type="button"
+                                                className="inline-flex items-center justify-center rounded-md border border-border/60 bg-secondary/40 p-1 hover:bg-secondary"
+                                                onClick={(e) => {
+                                                  e.stopPropagation()
+                                                  copyAddress(token.address)
+                                                }}
+                                                aria-label="Copy address"
+                                                title="Copy address"
+                                              >
+                                                <Copy className="h-3 w-3" />
+                                              </button>
+                                            </div>
+                                            {renderTokenMeta(token)}
                                           </div>
                                         </div>
-                                      </TableCell>
-                                      <TableCell className="py-2 px-4 text-[10px] sm:text-xs text-muted-foreground">
-                                        {formatMetric(token.marketCap)}
-                                      </TableCell>
-                                      <TableCell className="py-2 px-4 text-[10px] sm:text-xs text-muted-foreground">
-                                        {formatMetric(token.volume24h)}
-                                      </TableCell>
-                                      <TableCell className="py-2 px-4 text-[10px] sm:text-xs text-muted-foreground">
-                                        {formatMetric(token.liquidity)}
                                       </TableCell>
                                     </TableRow>
                                   ))}
@@ -364,15 +646,6 @@ export default function Home() {
                                     <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                                       Token
                                     </TableHead>
-                                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                                      MC
-                                    </TableHead>
-                                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                                      V
-                                    </TableHead>
-                                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                                      L
-                                    </TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -390,23 +663,33 @@ export default function Home() {
                                             className="h-8 w-8 rounded-full object-cover"
                                           />
                                           <div className="min-w-0">
-                                            <div className="text-[11px] sm:text-xs font-semibold truncate">
-                                              {token.name || token.symbol || "Unknown"}
+                                            <div className="text-[11px] sm:text-xs font-semibold truncate flex items-center gap-1">
+                                              <span className="truncate">{token.name || token.symbol || "Unknown"}</span>
+                                              {renderExchangeBadge(token)}
                                             </div>
                                             <div className="text-[10px] text-muted-foreground truncate">
                                               {token.symbol || "???"}
                                             </div>
+                                            <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+                                              <span className="truncate max-w-[220px] sm:max-w-[260px]">
+                                                {formatAddress(token.address)}
+                                              </span>
+                                              <button
+                                                type="button"
+                                                className="inline-flex items-center justify-center rounded-md border border-border/60 bg-secondary/40 p-1 hover:bg-secondary"
+                                                onClick={(e) => {
+                                                  e.stopPropagation()
+                                                  copyAddress(token.address)
+                                                }}
+                                                aria-label="Copy address"
+                                                title="Copy address"
+                                              >
+                                                <Copy className="h-3 w-3" />
+                                              </button>
+                                            </div>
+                                            {renderTokenMeta(token)}
                                           </div>
                                         </div>
-                                      </TableCell>
-                                      <TableCell className="py-2 px-4 text-[10px] sm:text-xs text-muted-foreground">
-                                        {formatMetric(token.marketCap)}
-                                      </TableCell>
-                                      <TableCell className="py-2 px-4 text-[10px] sm:text-xs text-muted-foreground">
-                                        {formatMetric(token.volume24h)}
-                                      </TableCell>
-                                      <TableCell className="py-2 px-4 text-[10px] sm:text-xs text-muted-foreground">
-                                        {formatMetric(token.liquidity)}
                                       </TableCell>
                                     </TableRow>
                                   ))}

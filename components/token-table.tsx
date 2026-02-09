@@ -1023,12 +1023,17 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   const [mobulaRefreshTick, setMobulaRefreshTick] = useState(0)
   const [boostTokens, setBoostTokens] = useState<TokenRowRuntime[]>([])
   const [boostLoading, setBoostLoading] = useState(false)
+  const [boostShowSkeleton, setBoostShowSkeleton] = useState(false)
   const [boostError, setBoostError] = useState<string | null>(null)
   const [adsTokens, setAdsTokens] = useState<TokenRowRuntime[]>([])
   const [adsLoading, setAdsLoading] = useState(false)
+  const [adsShowSkeleton, setAdsShowSkeleton] = useState(false)
   const [adsError, setAdsError] = useState<string | null>(null)
   const [dexPaidTokens, setDexPaidTokens] = useState<TokenRowRuntime[]>([])
   const [dexPaidLoading, setDexPaidLoading] = useState(false)
+  const [dexPaidShowSkeleton, setDexPaidShowSkeleton] = useState(false)
+  // stores frozen display labels (e.g. "4m ago") for dexpaid tokens when user clicks
+  const [dexPaidOriginalTimes, setDexPaidOriginalTimes] = useState<Record<string, string>>({})
   const [dexPaidError, setDexPaidError] = useState<string | null>(null)
   const [newTabHiddenDetails, setNewTabHiddenDetails] = useState<Record<string, boolean>>({})
   const [newTabDetailsDrawerToken, setNewTabDetailsDrawerToken] = useState<TokenRowRuntime | null>(null)
@@ -1040,6 +1045,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   const mobulaInitialLoadedRef = useRef(false)
   const [ctoTokens, setCtoTokens] = useState<TokenRowRuntime[]>([])
   const [loadingCTO, setLoadingCTO] = useState(false)
+  const [ctoShowSkeleton, setCtoShowSkeleton] = useState(false)
   const [ctoRateLimited, setCtoRateLimited] = useState(false)
   const [showPrelaunchForm, setShowPrelaunchForm] = useState(false)
   const [snipeNotice, setSnipeNotice] = useState<string | null>(null)
@@ -1101,6 +1107,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     const fetchCTO = async (showLoading = false) => {
       try {
         if (showLoading) setLoadingCTO(true)
+        if (showLoading) setCtoShowSkeleton(true)
         setCtoRateLimited(false)
         if (showLoading) setCtoTokens([])
 
@@ -1189,7 +1196,10 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
           setCtoTokens([])
         }
       } finally {
-        if (!aborted && showLoading) setLoadingCTO(false)
+        if (!aborted && showLoading) {
+          setLoadingCTO(false)
+          setCtoShowSkeleton(false)
+        }
       }
     }
 
@@ -1344,6 +1354,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
       try {
         setBoostError(null)
         if (showLoading) setBoostLoading(true)
+        if (showLoading) setBoostShowSkeleton(true)
         if (showLoading) setBoostTokens([])
 
         const filterParam = boostFilter || "all"
@@ -1407,7 +1418,10 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
           if (showLoading) setBoostTokens([])
         }
       } finally {
-        if (!aborted && showLoading) setBoostLoading(false)
+        if (!aborted && showLoading) {
+          setBoostLoading(false)
+          setBoostShowSkeleton(false)
+        }
       }
     }
 
@@ -1439,6 +1453,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
       try {
         setDexPaidError(null)
         if (showLoading) setDexPaidLoading(true)
+        if (showLoading) setDexPaidShowSkeleton(true)
         if (showLoading) setDexPaidTokens([])
         const res = await fetch("/api/ads")
         if (!res.ok) throw new Error(`Dexscreener ads failed: ${res.status}`)
@@ -1451,6 +1466,82 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
           }))
           .filter((it) => typeof it.tokenAddress === "string" && it.tokenAddress.length > 0)
           .slice(0, 50)
+
+        // Fetch latest dexscreener profiles once to extract openGraph timestamps (if available)
+        let dexscreenerProfiles: any = null
+        try {
+          const profRes = await fetch("/api/dexscreener-latest-profiles", { cache: "no-store" })
+          if (profRes.ok) {
+            dexscreenerProfiles = await profRes.json().catch(() => null)
+          }
+        } catch {
+          dexscreenerProfiles = null
+        }
+
+        const ogTimestampByAddress = new Map<string, string>()
+        const dexscreenerIndex: Array<{ keys: string[]; ogRawLower?: string; gmt: string }> = []
+        if (Array.isArray(dexscreenerProfiles)) {
+          for (const item of dexscreenerProfiles) {
+            const addrRaw =
+              pickString(item, ["address", "tokenAddress", "token_address", "contractAddress", "contract_address"]) ||
+              pickString(item, ["contract"]) ||
+              undefined
+
+            // openGraph might be a string or an object with a `value`/`url` field
+            const ogRaw =
+              (typeof item.openGraph === "string" && item.openGraph) ||
+              (typeof item.open_graph === "string" && item.open_graph) ||
+              (typeof item.og === "string" && item.og) ||
+              (typeof item.openGraph?.value === "string" && item.openGraph.value) ||
+              (typeof item.openGraph?.url === "string" && item.openGraph.url) ||
+              (typeof item.og?.value === "string" && item.og.value) ||
+              undefined
+
+            if (!ogRaw || typeof ogRaw !== "string") continue
+            const m = ogRaw.match(/[?&]timestamp=(\d{10,})/)
+            if (!m) continue
+            const ts = Number(m[1])
+            if (!Number.isFinite(ts)) continue
+            // store as GMT string and map to multiple possible keys (address + token id from path)
+            try {
+              const gmt = new Date(ts).toUTCString()
+              // prepare keys list for faster fuzzy lookup later
+              const keys: string[] = []
+              if (typeof addrRaw === "string" && addrRaw.length > 0) {
+                let n = addrRaw.toLowerCase()
+                if (n.includes(":")) n = n.split(":").pop() || n
+                keys.push(n)
+                if (n.startsWith("0x")) keys.push(n.replace(/^0x/, ""))
+              }
+
+              // attempt to extract token id from the openGraph path (last segment)
+              try {
+                const u = new URL(ogRaw)
+                const parts = u.pathname.split("/").filter(Boolean)
+                const last = parts.length > 0 ? parts[parts.length - 1] : undefined
+                if (last) {
+                  const tokenId = last.split("?")[0].toLowerCase()
+                  keys.push(tokenId)
+                }
+              } catch {
+                const pathMatch = ogRaw.match(/\/([^\/?#]+)(?:[?#]|$)/)
+                if (pathMatch && pathMatch[1]) {
+                  keys.push(pathMatch[1].toLowerCase())
+                }
+              }
+
+              const ogRawLower = ogRaw.toLowerCase()
+              // populate map for direct lookups
+              for (const k of keys) {
+                if (k) ogTimestampByAddress.set(k, gmt)
+              }
+              // store for fuzzy substring matches
+              dexscreenerIndex.push({ keys, ogRawLower, gmt })
+            } catch {
+              // ignore
+            }
+          }
+        }
 
         const results = await Promise.allSettled(
           candidates.map(async (candidate) => {
@@ -1478,6 +1569,40 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                 ? { ...withSignals, exchangeName, exchangeLogo }
                 : withSignals
 
+            // If we have an openGraph timestamp from dexscreener profiles, prefer it for updatedAt (convert to GMT)
+            const lookupCandidates = new Set<string>()
+            const rawAddr = String(candidate.tokenAddress || "").toLowerCase()
+            lookupCandidates.add(rawAddr)
+            if (rawAddr.includes(":")) lookupCandidates.add(rawAddr.split(":").pop() || rawAddr)
+            if (rawAddr.startsWith("0x")) lookupCandidates.add(rawAddr.replace(/^0x/, ""))
+            // also try uppercase/lowercase variants
+            lookupCandidates.add(rawAddr.replace(/^0x/, ""))
+
+            let foundOg: string | undefined = undefined
+            for (const key of lookupCandidates) {
+              const v = ogTimestampByAddress.get(key)
+              if (v) {
+                foundOg = v
+                break
+              }
+            }
+
+            // fuzzy fallback: check if candidate address appears inside any og url
+            if (!foundOg && Array.isArray(dexscreenerIndex)) {
+              const candNorm = rawAddr.replace(/^0x/, "").toLowerCase()
+              for (const idx of dexscreenerIndex) {
+                if (idx.ogRawLower && idx.ogRawLower.includes(candNorm)) {
+                  foundOg = idx.gmt
+                  break
+                }
+                if (idx.keys.some((k) => k === candNorm)) {
+                  foundOg = idx.gmt
+                  break
+                }
+              }
+            }
+
+            if (foundOg) return { ...withExchange, updatedAt: foundOg }
             return adPaidDate ? { ...withExchange, updatedAt: adPaidDate } : withExchange
           }),
         )
@@ -1488,14 +1613,47 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
           .filter((r): r is PromiseFulfilledResult<TokenRowRuntime> => r.status === "fulfilled")
           .map((r) => r.value)
 
-        setDexPaidTokens(mapped)
+        // If this is a background refresh (showLoading = false), preserve original updatedAt values
+        const finalTokens = mapped.map((t) => {
+          try {
+            const key = String(t.address || "").toLowerCase()
+            const orig = dexPaidOriginalTimes[key] || dexPaidOriginalTimes[key.replace(/^0x/, "")]
+            if (!showLoading && orig) {
+              return { ...t, updatedAt: orig }
+            }
+            return t
+          } catch {
+            return t
+          }
+        })
+
+        setDexPaidTokens(finalTokens)
+        if (showLoading) {
+          const byAddr: Record<string, string> = {}
+          for (const t of mapped) {
+            try {
+              const key = String(t.address || "").toLowerCase()
+              if (!key) continue
+              const sourceDate = t.updatedAt || new Date().toISOString()
+              const label = getTimeAgo(sourceDate)
+              // always set/overwrite on user-initiated fetch so repeated clicks pick up updated OG timestamps
+              byAddr[key] = label
+            } catch {
+              // ignore
+            }
+          }
+          setDexPaidOriginalTimes((prev) => ({ ...prev, ...byAddr }))
+        }
       } catch (err: any) {
         if (!aborted) {
           setDexPaidError(typeof err?.message === "string" ? err.message : "Failed to load Dexpaid tokens")
           if (showLoading) setDexPaidTokens([])
         }
       } finally {
-        if (!aborted && showLoading) setDexPaidLoading(false)
+        if (!aborted && showLoading) {
+          setDexPaidLoading(false)
+          setDexPaidShowSkeleton(false)
+        }
       }
     }
 
@@ -1527,6 +1685,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
       try {
         setAdsError(null)
         if (showLoading) setAdsLoading(true)
+        if (showLoading) setAdsShowSkeleton(true)
         if (showLoading) setAdsTokens([])
 
         const res = await fetch("/api/ads?chainId=solana")
@@ -1604,7 +1763,10 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
           if (showLoading) setAdsTokens([])
         }
       } finally {
-        if (!aborted && showLoading) setAdsLoading(false)
+        if (!aborted && showLoading) {
+          setAdsLoading(false)
+          setAdsShowSkeleton(false)
+        }
       }
     }
 
@@ -1671,6 +1833,15 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     const hours = Math.floor(minutes / 60)
     if (hours < 24) return `${hours}h ago`
     return `${Math.floor(hours / 24)}d ago`
+  }
+
+  const getDisplayedUpdated = (token: TokenRowRuntime) => {
+    if (activeTab === "dexpaid") {
+      const key = String(token.address || "").toLowerCase()
+      const orig = dexPaidOriginalTimes[key] || dexPaidOriginalTimes[key.replace(/^0x/, "")]
+      if (orig) return orig
+    }
+    return getTimeAgo(token.updatedAt)
   }
 
   const openBuyLink = (platform: string, address: string, e: MouseEvent) => {
@@ -2562,7 +2733,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                       </TableCell>
                       
                       <TableCell className="text-muted-foreground text-[9px] sm:text-[10px] py-2 px-4">
-                        {getTimeAgo(token.updatedAt)}
+                        {getDisplayedUpdated(token)}
                       </TableCell>
                       <TableCell className="text-center py-2 px-4">
                         <div className="flex justify-center gap-1">
@@ -2602,13 +2773,124 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
         ) : (
           <>
             {effectiveFilteredTokensLength === 0 ? (
-              activeTab === "boost" && boostLoading ? (
+              activeTab === "boost" && boostShowSkeleton ? (
+                <div className="h-[600px] overflow-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
+                      <TableRow className="hover:bg-transparent border-border">
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Token</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">MC</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Price</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">1m</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Vol(24h)</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Updated</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 text-center">Buy</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <TableRow key={`tab-skel-${i}`} className="border-border">
+                          <TableCell className="py-2 px-4">
+                            <div className="flex items-center gap-2">
+                              <Skeleton className="h-7 w-7 rounded-full" />
+                              <div className="flex flex-col gap-1">
+                                <Skeleton className="h-3 w-24" />
+                                <Skeleton className="h-2 w-16" />
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-12 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-10 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-8 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-16 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4"><Skeleton className="h-3 w-20" /></TableCell>
+                          <TableCell className="py-2 px-4 text-center"><Skeleton className="h-6 w-24 rounded" /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : activeTab === "boost" && boostLoading ? (
                 <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
                   Loading boost tokens…
+                </div>
+              ) : activeTab === "ads" && adsShowSkeleton ? (
+                <div className="h-[600px] overflow-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
+                      <TableRow className="hover:bg-transparent border-border">
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Token</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">MC</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Price</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">1m</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Vol(24h)</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Updated</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 text-center">Buy</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <TableRow key={`tab-skel-${i}`} className="border-border">
+                          <TableCell className="py-2 px-4">
+                            <div className="flex items-center gap-2">
+                              <Skeleton className="h-7 w-7 rounded-full" />
+                              <div className="flex flex-col gap-1">
+                                <Skeleton className="h-3 w-24" />
+                                <Skeleton className="h-2 w-16" />
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-12 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-10 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-8 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-16 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4"><Skeleton className="h-3 w-20" /></TableCell>
+                          <TableCell className="py-2 px-4 text-center"><Skeleton className="h-6 w-24 rounded" /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               ) : activeTab === "ads" && adsLoading ? (
                 <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
                   Loading ads…
+                </div>
+              ) : activeTab === "cto" && ctoShowSkeleton ? (
+                <div className="h-[600px] overflow-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
+                      <TableRow className="hover:bg-transparent border-border">
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Token</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">MC</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Price</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">5m</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Vol(24h)</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Updated</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 text-center">Buy</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <TableRow key={`tab-skel-${i}`} className="border-border">
+                          <TableCell className="py-2 px-4">
+                            <div className="flex items-center gap-2">
+                              <Skeleton className="h-7 w-7 rounded-full" />
+                              <div className="flex flex-col gap-1">
+                                <Skeleton className="h-3 w-24" />
+                                <Skeleton className="h-2 w-16" />
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-12 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-10 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-8 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-16 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4"><Skeleton className="h-3 w-20" /></TableCell>
+                          <TableCell className="py-2 px-4 text-center"><Skeleton className="h-6 w-24 rounded" /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               ) : activeTab === "cto" && loadingCTO ? (
                 <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
@@ -2629,6 +2911,43 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
               ) : activeTab === "cto" && !loadingCTO ? (
                 <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
                   No community takeovers available.
+                </div>
+              ) : activeTab === "dexpaid" && dexPaidShowSkeleton ? (
+                <div className="h-[600px] overflow-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
+                      <TableRow className="hover:bg-transparent border-border">
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Token</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">MC</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Price</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">1m</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Vol(24h)</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Updated</TableHead>
+                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4 text-center">Buy</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <TableRow key={`tab-skel-${i}`} className="border-border">
+                          <TableCell className="py-2 px-4">
+                            <div className="flex items-center gap-2">
+                              <Skeleton className="h-7 w-7 rounded-full" />
+                              <div className="flex flex-col gap-1">
+                                <Skeleton className="h-3 w-24" />
+                                <Skeleton className="h-2 w-16" />
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-12 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-10 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-8 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-16 ml-auto" /></TableCell>
+                          <TableCell className="py-2 px-4"><Skeleton className="h-3 w-20" /></TableCell>
+                          <TableCell className="py-2 px-4 text-center"><Skeleton className="h-6 w-24 rounded" /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               ) : activeTab === "dexpaid" && dexPaidLoading ? (
                 <div className="h-[600px] flex items-center justify-center text-muted-foreground text-sm">
@@ -2836,7 +3155,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                               </TableCell>
                               
                               <TableCell className="text-right text-[9px] sm:text-xs text-muted-foreground py-2 px-4">
-                                {getTimeAgo(token.updatedAt)}
+                                {getDisplayedUpdated(token)}
                               </TableCell>
                               <TableCell className="py-2 px-4">
                                 <div className="flex gap-1 justify-center">
@@ -3100,7 +3419,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                             </div>
                           </TableCell> 
                           <TableCell className="text-right text-[9px] sm:text-xs text-muted-foreground py-2 px-4">
-                            {getTimeAgo(token.updatedAt)}
+                            {getDisplayedUpdated(token)}
                           </TableCell>
                           <TableCell className="py-2 px-4">
                             <div className="flex gap-1 justify-center">

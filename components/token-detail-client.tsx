@@ -155,9 +155,9 @@ export default function TokenDetailClient({ address }: { address: string }) {
   useEffect(() => {
     let aborted = false
 
-    const fetchRugReport = async () => {
+    const fetchRugReport = async (showLoading = false) => {
       try {
-        setRugLoading(true)
+        if (showLoading) setRugLoading(true)
         setRugError(null)
         const res = await fetch(`/api/rugcheck/${address}`)
         if (!res.ok) {
@@ -187,7 +187,7 @@ export default function TokenDetailClient({ address }: { address: string }) {
         console.error("[v0] Error fetching rugcheck:", err)
         if (!aborted) setRugError(err?.message || "Failed to load rugcheck report")
       } finally {
-        if (!aborted) setRugLoading(false)
+        if (!aborted && showLoading) setRugLoading(false)
       }
     }
 
@@ -199,12 +199,14 @@ export default function TokenDetailClient({ address }: { address: string }) {
       return
     }
 
-    fetchRugReport()
+    fetchRugReport(true)
     if (rugIntervalRef.current) {
       window.clearInterval(rugIntervalRef.current)
       rugIntervalRef.current = null
     }
-    rugIntervalRef.current = window.setInterval(fetchRugReport, 1000)
+    rugIntervalRef.current = window.setInterval(() => {
+      fetchRugReport(false)
+    }, 1000)
 
     return () => {
       aborted = true

@@ -1619,10 +1619,10 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   const openBuyLink = (platform: string, address: string, e: MouseEvent) => {
     e.stopPropagation()
     const links: Record<string, string> = {
-      trojan: `https://t.me/solana_trojanbot?start=${address}`,
-      axion: `https://axion.trade/swap?token=${address}`,
-      gmgn: `https://gmgn.ai/sol/token/${address}`,
-      bonk: `https://www.bonkbot.io/swap/${address}`,
+      trojan: `https://trojan.com/@oephyl?start=${address}`,
+      axion: `https://axiom.trade/@oephyl/solana/${address}`,
+      gmgn: `https://gmgn.ai/sol/token/${address}?ref=EuQryBJJ`,
+      bonk: `https://trade.padre.gg/rk/oephyl?token=${address}`,
     }
     window.open(links[platform] || "#", "_blank")
   }
@@ -2366,7 +2366,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                     <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Price</TableHead>
                     <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">5m</TableHead>
                     <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Vol(24h)</TableHead>
-                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Signals</TableHead>
+                    
                     <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Updated</TableHead>
                     <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-center text-[10px] sm:text-xs bg-background px-4">Buy</TableHead>
                   </TableRow>
@@ -2387,12 +2387,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                       <TableCell className="py-2 px-4"><Skeleton className="h-3 w-12" /></TableCell>
                       <TableCell className="py-2 px-4"><Skeleton className="h-3 w-8" /></TableCell>
                       <TableCell className="py-2 px-4"><Skeleton className="h-3 w-16" /></TableCell>
-                      <TableCell className="py-2 px-4">
-                        <div className="flex gap-1">
-                          <Skeleton className="h-3 w-10" />
-                          <Skeleton className="h-3 w-8" />
-                        </div>
-                      </TableCell>
+                      
                       <TableCell className="py-2 px-4"><Skeleton className="h-3 w-20" /></TableCell>
                       <TableCell className="py-2 px-4 text-center"><Skeleton className="h-6 w-12 rounded" /></TableCell>
                     </TableRow>
@@ -2435,9 +2430,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                     <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                       Vol(24h)
                     </TableHead>
-                    <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                      Signals
-                    </TableHead>
+                    
                     <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                       Updated
                     </TableHead>
@@ -2510,13 +2503,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                       <TableCell className="text-right font-mono text-[9px] sm:text-[10px] py-2 px-4">
                         ${formatNumber(token.volume24h)}
                       </TableCell>
-                      <TableCell className="py-2 px-4">
-                        <div className="flex gap-1 flex-wrap">
-                          {token.signals.slice(0, 3).map((signal, index) => (
-                            <SignalBadge key={index} type={signal} boostCount={token.boostCount} />
-                          ))}
-                        </div>
-                      </TableCell>
+                      
                       <TableCell className="text-muted-foreground text-[9px] sm:text-[10px] py-2 px-4">
                         {getTimeAgo(token.updatedAt)}
                       </TableCell>
@@ -2638,7 +2625,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                           {activeTab === "new" || activeTab === "dexpaid" ? "1m" : "5m"}
                         </TableHead>
                         <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Vol(24h)</TableHead>
-                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Signals</TableHead>
+                        
                         <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">Updated</TableHead>
                         <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-center text-[10px] sm:text-xs bg-background px-4">Buy</TableHead>
                       </TableRow>
@@ -2659,13 +2646,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                           <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-10 ml-auto" /></TableCell>
                           <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-8 ml-auto" /></TableCell>
                           <TableCell className="py-2 px-4 text-right"><Skeleton className="h-3 w-16 ml-auto" /></TableCell>
-                          <TableCell className="py-2 px-4">
-                            <div className="flex gap-1">
-                              <Skeleton className="h-3 w-10" />
-                              <Skeleton className="h-3 w-8" />
-                              <Skeleton className="h-3 w-6" />
-                            </div>
-                          </TableCell>
+                          
                           <TableCell className="py-2 px-4"><Skeleton className="h-3 w-20" /></TableCell>
                           <TableCell className="py-2 px-4 text-center"><Skeleton className="h-6 w-24 rounded" /></TableCell>
                         </TableRow>
@@ -2704,9 +2685,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                         <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                           Vol(24h)
                         </TableHead>
-                        <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
-                          Signals
-                        </TableHead>
+                        
                         <TableHead className="sticky top-0 z-30 font-semibold text-foreground text-[10px] sm:text-xs bg-background px-4">
                           Updated
                         </TableHead>
@@ -2720,7 +2699,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                         shouldVirtualizeNewTab &&
                         newTabWindowed.topPad > 0 && (
                         <TableRow className="border-border hover:bg-transparent">
-                          <TableCell colSpan={8} style={{ height: newTabWindowed.topPad }} className="p-0" />
+                          <TableCell colSpan={7} style={{ height: newTabWindowed.topPad }} className="p-0" />
                         </TableRow>
                       )}
 
@@ -2798,24 +2777,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                                   <span>{formatNumber(token.volume24h)}</span>
                                 </div>
                               </TableCell>
-                              <TableCell className="py-2 px-4">
-                                <div className="flex flex-wrap gap-1">
-                                  {token.signals.slice(0, 5).map((signal, idx) => (
-                                    <SignalBadge
-                                      key={idx}
-                                      type={signal}
-                                      size="sm"
-                                      iconOnly
-                                      boostCount={signal === "DEXBOOST_PAID" ? token.boostCount : undefined}
-                                    />
-                                  ))}
-                                  {token.signals.length > 5 && (
-                                    <span className="text-[9px] sm:text-xs text-muted-foreground">
-                                      +{token.signals.length - 5}
-                                    </span>
-                                  )}
-                                </div>
-                              </TableCell>
+                              
                               <TableCell className="text-right text-[9px] sm:text-xs text-muted-foreground py-2 px-4">
                                 {getTimeAgo(token.updatedAt)}
                               </TableCell>
@@ -3079,8 +3041,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                                 </span>
                               )}
                             </div>
-                          </TableCell>
-                          <TableCell className="py-2 px-4" />
+                          </TableCell> 
                           <TableCell className="text-right text-[9px] sm:text-xs text-muted-foreground py-2 px-4">
                             {getTimeAgo(token.updatedAt)}
                           </TableCell>
@@ -3140,7 +3101,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                           onClick={() => handleTokenClick(token)}
                           className={rowClassName}
                         >
-                          <TableCell colSpan={7} className="px-4 py-2">
+                          <TableCell colSpan={6} className="px-4 py-2">
                             <div className="flex flex-col gap-1">
                               <div className="flex flex-wrap items-center gap-2">
                                 {token.signals.slice(0, 6).map((signal, idx) => (
@@ -3270,7 +3231,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
                         shouldVirtualizeNewTab &&
                         newTabWindowed.bottomPad > 0 && (
                         <TableRow className="border-border hover:bg-transparent">
-                          <TableCell colSpan={8} style={{ height: newTabWindowed.bottomPad }} className="p-0" />
+                          <TableCell colSpan={7} style={{ height: newTabWindowed.bottomPad }} className="p-0" />
                         </TableRow>
                       )}
                     </TableBody>

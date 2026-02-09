@@ -29,15 +29,46 @@ export async function GET(
       throw new Error(`API request failed: ${response.status}`)
     }
 
-    const apiData = await response.json()
-    console.log("[v0] API returned tokens count:", apiData?.data?.length || 0)
+      const apiData = await response.json()
 
-    // Find the specific token by address
-    const tokenData = apiData?.data
-    console.log(tokenData.id)
+      // Support both shapes: top-level array `[...]` and object with `data` (`{ data: [...] }`)
+      let list: any[] = []
+      if (Array.isArray(apiData)) list = apiData
+      else if (Array.isArray(apiData?.data)) list = apiData.data
+      else if (apiData?.data) list = [apiData.data]
+
+      console.log("[v0] API returned tokens count:", list.length)
+    const tokenData = list.find((t: any) => {
+      const id = (t?.id ?? t?.address ?? t?.mint ?? "").toString().toLowerCase()
+      return id === address.toLowerCase()
+    }) ?? list[0] ?? null
+
     if (!tokenData) {
       console.log("[v0] Token not found in API data")
       return NextResponse.json({ success: false, error: "Token not found" }, { status: 404 })
+    }
+
+    // Safely parse updatedAt from multiple possible shapes (seconds, milliseconds, ISO string)
+    const parseUpdatedAt = (val: any) => {
+      if (val == null) return new Date().toISOString()
+      if (typeof val === "number") {
+        const ms = val > 1e12 ? val : val * 1000
+        const d = new Date(ms)
+        if (!Number.isNaN(d.getTime())) return d.toISOString()
+        return new Date().toISOString()
+      }
+      if (typeof val === "string") {
+        const num = Number(val)
+        if (!Number.isNaN(num)) {
+          const ms = num > 1e12 ? num : num * 1000
+          const d = new Date(ms)
+          if (!Number.isNaN(d.getTime())) return d.toISOString()
+        }
+        const d2 = new Date(val)
+        if (!Number.isNaN(d2.getTime())) return d2.toISOString()
+        return new Date().toISOString()
+      }
+      return new Date().toISOString()
     }
 
     // Map the token data
@@ -51,11 +82,12 @@ export async function GET(
       change5m: tokenData.stats5m?.priceChange || 0,
       liquidity: tokenData.liquidity || 0,
       volume24h: 0,
-      updatedAt: tokenData.updatedAt ? new Date(tokenData.updatedAt * 1000).toISOString() : new Date().toISOString(),
+      updatedAt: parseUpdatedAt(tokenData.updatedAt),
       signals: [],
       boostCount: undefined,
       launchpad: tokenData.launchpad || false,
-      bondingCurve: tokenData.bondingCurve || null,
+      // Use bondingPercentage when available for progress; keep bondingCurve for compatibility
+      bondingCurve: tokenData.bondingPercentage ?? tokenData.bonding ?? tokenData.bondingCurve ?? null,
     }
 
     console.log("[v0] Token detail found and mapped")

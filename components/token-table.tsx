@@ -1098,11 +1098,11 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     }
     let aborted = false
 
-    const fetchCTO = async () => {
+    const fetchCTO = async (showLoading = false) => {
       try {
-        setLoadingCTO(true)
+        if (showLoading) setLoadingCTO(true)
         setCtoRateLimited(false)
-        setCtoTokens([])
+        if (showLoading) setCtoTokens([])
 
         const res = await fetch("/api/cto-tokens")
         if (!res.ok) {
@@ -1189,13 +1189,13 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
           setCtoTokens([])
         }
       } finally {
-        if (!aborted) setLoadingCTO(false)
+        if (!aborted && showLoading) setLoadingCTO(false)
       }
     }
 
-    fetchCTO()
+    fetchCTO(true)
     ctoIntervalRef.current = window.setInterval(() => {
-      fetchCTO()
+      fetchCTO(false)
     }, 3000)
 
     return () => {
@@ -1340,11 +1340,11 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     }
     let aborted = false
 
-    const fetchBoostTokens = async () => {
+    const fetchBoostTokens = async (showLoading = false) => {
       try {
         setBoostError(null)
-        setBoostLoading(true)
-        setBoostTokens([])
+        if (showLoading) setBoostLoading(true)
+        if (showLoading) setBoostTokens([])
 
         const filterParam = boostFilter || "all"
         const res = await fetch("/api/token-boosts/latest")
@@ -1404,16 +1404,16 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
       } catch (err: any) {
         if (!aborted) {
           setBoostError(typeof err?.message === "string" ? err.message : "Failed to load boost tokens")
-          setBoostTokens([])
+          if (showLoading) setBoostTokens([])
         }
       } finally {
-        if (!aborted) setBoostLoading(false)
+        if (!aborted && showLoading) setBoostLoading(false)
       }
     }
 
-    fetchBoostTokens()
+    fetchBoostTokens(true)
     boostIntervalRef.current = window.setInterval(() => {
-      fetchBoostTokens()
+      fetchBoostTokens(false)
     }, 3000)
 
     return () => {
@@ -1435,11 +1435,11 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     }
     let aborted = false
 
-    const fetchDexPaid = async () => {
+    const fetchDexPaid = async (showLoading = false) => {
       try {
         setDexPaidError(null)
-        setDexPaidLoading(true)
-        setDexPaidTokens([])
+        if (showLoading) setDexPaidLoading(true)
+        if (showLoading) setDexPaidTokens([])
         const res = await fetch("/api/ads")
         if (!res.ok) throw new Error(`Dexscreener ads failed: ${res.status}`)
         const json = await res.json().catch(() => null)
@@ -1492,16 +1492,16 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
       } catch (err: any) {
         if (!aborted) {
           setDexPaidError(typeof err?.message === "string" ? err.message : "Failed to load Dexpaid tokens")
-          setDexPaidTokens([])
+          if (showLoading) setDexPaidTokens([])
         }
       } finally {
-        if (!aborted) setDexPaidLoading(false)
+        if (!aborted && showLoading) setDexPaidLoading(false)
       }
     }
 
-    fetchDexPaid()
+    fetchDexPaid(true)
     dexPaidIntervalRef.current = window.setInterval(() => {
-      fetchDexPaid()
+      fetchDexPaid(false)
     }, 3000)
 
     return () => {
@@ -1523,11 +1523,11 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     }
     let aborted = false
 
-    const fetchAds = async () => {
+    const fetchAds = async (showLoading = false) => {
       try {
         setAdsError(null)
-        setAdsLoading(true)
-        setAdsTokens([])
+        if (showLoading) setAdsLoading(true)
+        if (showLoading) setAdsTokens([])
 
         const res = await fetch("/api/ads?chainId=solana")
         if (!res.ok) throw new Error(`Dexscreener ads failed: ${res.status}`)
@@ -1601,16 +1601,16 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
       } catch (err: any) {
         if (!aborted) {
           setAdsError(typeof err?.message === "string" ? err.message : "Failed to load ads")
-          setAdsTokens([])
+          if (showLoading) setAdsTokens([])
         }
       } finally {
-        if (!aborted) setAdsLoading(false)
+        if (!aborted && showLoading) setAdsLoading(false)
       }
     }
 
-    fetchAds()
+    fetchAds(true)
     adsIntervalRef.current = window.setInterval(() => {
-      fetchAds()
+      fetchAds(false)
     }, 3000)
 
     return () => {

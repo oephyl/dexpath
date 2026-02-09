@@ -50,6 +50,16 @@ export default function RoadmapPage() {
           desc: "Instant search by name/symbol/address with advanced filters by launchpad, boost level, and signal type",
           done: true,
         },
+        {
+          title: "$DEXPATH Token Launch",
+          desc: "Official token launch with utility features including premium access, governance voting, and platform revenue sharing",
+          done: true,
+        },
+        {
+          title: "Pump.fun Hackathon",
+          desc: "Participated and showcased Dexpath at Pump.fun Hackathon, connecting with Solana builders and expanding community visibility.",
+          done: true,
+        },
       ],
     },
     {
@@ -58,11 +68,7 @@ export default function RoadmapPage() {
       theme: "Enhancement & Optimization",
       description: "Advanced features and user experience improvements",
       items: [
-        {
-          title: "$DEXPATH Token Launch",
-          desc: "Official token launch with utility features including premium access, governance voting, and platform revenue sharing",
-          done: true,
-        },
+        // $DEXPATH Token Launch moved to Q1 2026
         {
           title: "Advanced Filtering System",
           desc: "Market cap ranges, volume thresholds, liquidity minimums, and custom signal combinations for power users",
@@ -235,57 +241,20 @@ export default function RoadmapPage() {
 
       <main className="container mx-auto px-4 py-12 max-w-6xl">
         <div className="mb-16 text-center">
-          <div className="flex items-center justify-center gap-3 mb-6">
-            <Image src="/images/logo-only.png" alt="Dexpath" width={64} height={64} />
-            <h1 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-primary via-cyan-400 to-primary bg-clip-text text-transparent">
-              Roadmap
-            </h1>
-          </div>
+          <h1 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-primary via-cyan-400 to-primary bg-clip-text text-transparent mb-4">
+            Roadmap
+          </h1>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
-            Our vision for building the most powerful Solana trading terminal with advanced features, AI intelligence,
-            and multi-chain support. Track our progress from foundation to ecosystem expansion.
+            Our vision for building the most powerful Solana trading terminal with advanced features, AI intelligence, and multi-chain support. Track our progress from foundation to ecosystem expansion.
           </p>
         </div>
 
-        <div className="grid md:grid-cols-4 gap-4 mb-12">
-          {[
-            { label: "Completed", count: roadmapItems[0].items.length, icon: CheckCircle2, color: "text-green-500" },
-            {
-              label: "In Progress",
-              count: roadmapItems[1].items.filter((i) => !i.done).length,
-              icon: Clock,
-              color: "text-blue-500",
-            },
-            {
-              label: "Planned",
-              count: roadmapItems[2].items.length + roadmapItems[3].items.length,
-              icon: Target,
-              color: "text-purple-500",
-            },
-            { label: "Future", count: roadmapItems[4].items.length, icon: TrendingUp, color: "text-gray-400" },
-          ].map((stat, i) => (
-            <Card key={i} className="bg-secondary/30 border-primary/20">
-              <CardContent className="pt-5 pb-4 text-center">
-                <stat.icon className={`h-7 w-7 ${stat.color} mx-auto mb-2`} />
-                <div className="text-3xl font-bold mb-1">{stat.count}</div>
-                <div className="text-xs text-muted-foreground">{stat.label}</div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
 
         <div className="relative space-y-12">
-          {/* Vertical line */}
-          <div className="absolute left-8 top-0 bottom-0 w-0.5 bg-border hidden md:block" />
-
-          {roadmapItems.map((quarter, idx) => (
-            <div key={idx} className="relative">
-              {/* Quarter marker */}
-              <div className="flex items-start gap-4 mb-6">
-                <div className="relative z-10 flex items-center justify-center w-16 h-16 rounded-full bg-background border-2 border-primary flex-shrink-0">
-                  <span className="text-sm font-bold text-primary">{quarter.quarter.split(" ")[0]}</span>
-                </div>
-                <div className="flex-1 pt-2">
+          <div className="space-y-10">
+            {roadmapItems.map((quarter, idx) => (
+              <div key={idx} className="relative">
+                <div className="mb-6 text-left">
                   <div className="flex items-center gap-3 mb-2">
                     <h2 className="text-3xl font-bold">{quarter.quarter}</h2>
                     {getStatusBadge(quarter.status)}
@@ -293,32 +262,39 @@ export default function RoadmapPage() {
                   <h3 className="text-xl font-semibold text-primary mb-1">{quarter.theme}</h3>
                   <p className="text-sm text-muted-foreground">{quarter.description}</p>
                 </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border border-border rounded-lg bg-background">
+                    <thead>
+                      <tr className="bg-secondary/30">
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Status</th>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Title</th>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {quarter.items.map((item, itemIdx) => (
+                        <tr key={itemIdx} className={item.done ? "bg-primary/5" : "bg-secondary/10"}>
+                          <td className="px-4 py-2">
+                            {item.done ? (
+                              <span className="inline-flex items-center gap-1 text-green-500 text-xs font-medium"><CheckCircle2 className="h-4 w-4" /> Completed</span>
+                            ) : quarter.status === "in-progress" ? (
+                              <span className="inline-flex items-center gap-1 text-blue-500 text-xs font-medium"><Clock className="h-4 w-4" /> In Progress</span>
+                            ) : quarter.status === "planned" ? (
+                              <span className="inline-flex items-center gap-1 text-purple-500 text-xs font-medium"><Target className="h-4 w-4" /> Planned</span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-gray-400 text-xs font-medium"><TrendingUp className="h-4 w-4" /> Future</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 font-semibold text-sm">{item.title}</td>
+                          <td className="px-4 py-2 text-sm text-muted-foreground">{item.desc}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-
-              {/* Items */}
-              <div className="md:ml-24 grid gap-4">
-                {quarter.items.map((item, itemIdx) => (
-                  <Card key={itemIdx} className={item.done ? "border-primary/50 bg-primary/5" : "bg-secondary/30"}>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="flex items-start gap-3 text-lg">
-                        {item.done ? (
-                          <CheckCircle2 className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
-                        ) : quarter.status === "in-progress" ? (
-                          <Clock className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" />
-                        ) : (
-                          <Circle className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0" />
-                        )}
-                        <span className={item.done ? "text-green-500" : ""}>{item.title}</span>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-0 pl-11">
-                      <p className="text-sm text-muted-foreground leading-relaxed">{item.desc}</p>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
         <Card className="mt-16 bg-gradient-to-br from-primary/10 to-cyan-500/10 border-primary/30">

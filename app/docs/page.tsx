@@ -218,6 +218,32 @@ export default function DocsPage() {
               marketing activity detected on Dexscreener. Hover over any icon in the table to see its full description.
             </p>
 
+            <div className="space-y-6 mt-6">
+              <h3 className="text-lg font-bold mb-2">Emoji & Symbol Legend in Token Table</h3>
+              <ul className="list-disc list-inside text-sm text-muted-foreground space-y-2">
+                <li><span className="font-bold">🟢</span> <span className="text-green-600">Green Dot</span>: Indicates positive values, such as high organic volume, upward momentum, or a "fresh" new token.</li>
+                <li><span className="font-bold">🟡</span> <span className="text-yellow-600">Yellow Dot</span>: Medium organic volume, high whale/top10 holdings, or stable momentum.</li>
+                <li><span className="font-bold">🔴</span> <span className="text-red-600">Red Dot</span>: Downward/cooling momentum, high risk, or negative signals.</li>
+                <li><span className="font-bold">📈</span> <span className="text-green-600">Gainers</span>: Tokens with the highest price increase.</li>
+                <li><span className="font-bold">📉</span> <span className="text-red-600">Losers</span>: Tokens with the biggest price drop.</li>
+                <li><span className="font-bold">💰</span> <span className="text-green-600">Volume</span>: Tokens with the highest transaction volume.</li>
+                <li><span className="font-bold">🧠</span> <span className="text-green-600">Smart</span>: Detected smart trader wallet.</li>
+                <li><span className="font-bold">🐳</span> <span className="text-green-600">Pro</span>: Detected pro trader wallet.</li>
+                <li><span className="font-bold">🆕</span> <span className="text-green-600">Fresh</span>: New/fresh buyer wallet.</li>
+                <li><span className="font-bold">📣</span> <span className="text-amber-500">Ad</span>: Token is running an advertisement (DexAD).</li>
+                <li><span className="font-bold">👁️</span> <span className="text-amber-500">Impressions</span>: Number of ad impressions.</li>
+                <li><span className="font-bold">⏱️</span> <span className="text-amber-500">Duration</span>: Ad duration.</li>
+                <li><span className="font-bold">🟢/🟡/🔴</span> <span className="text-green-600">Radar</span>: Token momentum status (UP, STB, COOL).</li>
+                <li><span className="font-bold">🔥</span> <span className="text-amber-500">Spike</span>: Indicates possible price spike signal.</li>
+                <li><span className="font-bold">DexBoost, DexAD, DexBar, CTO</span>: Lucide icons (lightning, speaker, chart, users) represent paid marketing signals.</li>
+                <li><span className="font-bold">CheckCircle2/XCircle/AlertTriangle</span>: Status for snipers, bundlers, insiders, and LP. Green = safe, red/yellow = risk.</li>
+                <li><span className="font-bold">Copy</span>: Button to copy wallet/token address.</li>
+                <li><span className="font-bold">Target</span>: Snipe button for quick action.</li>
+                <li><span className="font-bold">Rocket</span>: Prelaunch project detail.</li>
+              </ul>
+              <p className="text-xs text-muted-foreground mt-2">These emojis and symbols help you quickly read token data and understand status, risk, and trading opportunities in Dexpath.</p>
+            </div>
+
             <div className="space-y-4">
               <div className="p-5 rounded-lg bg-amber-500/5 border-2 border-amber-500/20">
                 <div className="flex items-start gap-4 mb-3">

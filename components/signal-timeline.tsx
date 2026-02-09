@@ -31,7 +31,9 @@ export function SignalTimeline({ events, analyzerContent }: SignalTimelineProps)
 
   const getTimeAgo = (dateString: string) => {
     const date = new Date(dateString)
+    // display in UTC so paymentTimestamp is not shifted to user's local timezone (e.g., GMT+7)
     return date.toLocaleString(undefined, {
+      timeZone: "UTC",
       month: "short",
       day: "numeric",
       hour: "2-digit",

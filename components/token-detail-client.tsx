@@ -38,52 +38,61 @@ export default function TokenDetailClient({ address }: { address: string }) {
   const [mobulaError, setMobulaError] = useState<string | null>(null)
   const mobulaTimerRef = useRef<number | null>(null)
   const tokenInfoRef = useRef<{ name: string; symbol: string; logo: string }>({ name: "", symbol: "", logo: "" })
+  const [chartReady, setChartReady] = useState(false)
 
   // Rugcheck state and fetch
+  const tokenIntervalRef = useRef<number | null>(null)
+  const rugIntervalRef = useRef<number | null>(null)
   const [rugReport, setRugReport] = useState<any | null>(null)
   const [rugLoading, setRugLoading] = useState<boolean>(true)
   const [rugError, setRugError] = useState<string | null>(null)
 
   useEffect(() => {
+    let aborted = false
+
     const fetchTokenData = async () => {
       try {
-        console.log("[v0] Fetching token detail for address:", address)
-
-        // Check if we're on client side before using localStorage
+        // Use cached token immediately if present, but still fetch fresh data
         if (typeof window !== 'undefined') {
           const cachedToken = localStorage.getItem(`token_${address}`)
           if (cachedToken) {
-            console.log("[v0] Token found in localStorage")
             setToken(JSON.parse(cachedToken))
             setLoading(false)
-            return
           }
         }
 
-        console.log("[v0] Token not in cache, fetching from API")
         const response = await fetch(`/api/token/${address}`)
-        const data = await response.json()
+        const data = await response.json().catch(() => null)
 
-        if (data.success && data.data) {
-          console.log("[v0] Token data received from API")
+        if (aborted) return
+
+        if (data?.success && data.data) {
           setToken(data.data)
-          // Only set localStorage on client side
           if (typeof window !== 'undefined') {
             localStorage.setItem(`token_${address}`, JSON.stringify(data.data))
           }
-        } else {
-          console.log("[v0] Token not found in API")
-          setToken(null)
         }
       } catch (error) {
         console.error("[v0] Error fetching token detail:", error)
-        setToken(null)
       } finally {
-        setLoading(false)
+        if (!aborted) setLoading(false)
       }
     }
 
+    if (tokenIntervalRef.current) {
+      window.clearInterval(tokenIntervalRef.current)
+      tokenIntervalRef.current = null
+    }
     fetchTokenData()
+    tokenIntervalRef.current = window.setInterval(fetchTokenData, 3000)
+
+    return () => {
+      aborted = true
+      if (tokenIntervalRef.current) {
+        window.clearInterval(tokenIntervalRef.current)
+        tokenIntervalRef.current = null
+      }
+    }
   }, [address])
 
   useEffect(() => {
@@ -126,8 +135,9 @@ export default function TokenDetailClient({ address }: { address: string }) {
       }
     }
 
+    if (!chartReady) return
     fetchMobula()
-    mobulaTimerRef.current = window.setInterval(fetchMobula, 5000)
+    mobulaTimerRef.current = window.setInterval(fetchMobula, 3000)
 
     return () => {
       aborted = true
@@ -137,9 +147,11 @@ export default function TokenDetailClient({ address }: { address: string }) {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address])
+  }, [address, chartReady])
 
   useEffect(() => {
+    let aborted = false
+
     const fetchRugReport = async () => {
       try {
         setRugLoading(true)
@@ -149,16 +161,39 @@ export default function TokenDetailClient({ address }: { address: string }) {
           throw new Error(`Rugcheck request failed: ${res.status}`)
         }
         const data = await res.json()
-        setRugReport(data)
+        if (!aborted) setRugReport(data)
       } catch (err: any) {
         console.error("[v0] Error fetching rugcheck:", err)
-        setRugError(err?.message || "Failed to load rugcheck report")
+        if (!aborted) setRugError(err?.message || "Failed to load rugcheck report")
       } finally {
-        setRugLoading(false)
+        if (!aborted) setRugLoading(false)
       }
     }
+
+    if (!chartReady) {
+      if (rugIntervalRef.current) {
+        window.clearInterval(rugIntervalRef.current)
+        rugIntervalRef.current = null
+      }
+      return
+    }
+
     fetchRugReport()
-  }, [address])
+    if (rugIntervalRef.current) {
+      window.clearInterval(rugIntervalRef.current)
+      rugIntervalRef.current = null
+    }
+    rugIntervalRef.current = window.setInterval(fetchRugReport, 3000)
+
+    return () => {
+      aborted = true
+      if (rugIntervalRef.current) {
+        window.clearInterval(rugIntervalRef.current)
+        rugIntervalRef.current = null
+      }
+    }
+  }, [address, chartReady])
+  
 
   // Dexscreener Orders/Boosts timeline (declare before any early returns)
   useEffect(() => {
@@ -202,10 +237,11 @@ export default function TokenDetailClient({ address }: { address: string }) {
       }
     }
 
+    if (!chartReady) return
     fetchDexOrders()
-    timer = setInterval(fetchDexOrders, 10000)
+    timer = setInterval(fetchDexOrders, 3000)
     return () => timer && clearInterval(timer)
-  }, [address])
+  }, [address, chartReady])
 
   // Memoized rugcheck calculations
   const rugcheckSummary = useMemo(() => {
@@ -415,7 +451,7 @@ export default function TokenDetailClient({ address }: { address: string }) {
     return (
       <div className="min-h-screen bg-background">
         <TopNav />
-        <main className="container mx-auto px-4 py-6">
+        <main className="container mx-auto px-2 sm:px-4 py-4 sm:py-6 max-w-[1600px]">
           <div className="mb-6">
             <div className="flex items-start gap-4 mb-3">
               <Skeleton className="h-16 w-16 rounded-full" />
@@ -502,7 +538,7 @@ export default function TokenDetailClient({ address }: { address: string }) {
     return (
       <div className="min-h-screen bg-background">
         <TopNav />
-        <div className="container mx-auto px-4 py-12 text-center">
+        <div className="container mx-auto px-2 sm:px-4 py-12 text-center max-w-[1600px]">
           <p className="text-muted-foreground">Token not found</p>
           <Button onClick={() => router.push("/")} className="mt-4">
             Go Home
@@ -545,7 +581,7 @@ export default function TokenDetailClient({ address }: { address: string }) {
     <div className="min-h-screen bg-background">
       <TopNav />
 
-      <main className="container mx-auto px-4 py-6">
+      <main className="container mx-auto px-2 sm:px-4 py-4 sm:py-6 max-w-[1600px]">
         <Button
           variant="ghost"
           size="sm"
@@ -616,6 +652,7 @@ export default function TokenDetailClient({ address }: { address: string }) {
                   id="mobula-chart-embed"
                   title={`${token.name}`}
                   src={`https://www.mtt.gg/embed/token/solana:solana/${token.address}?embed=1&resolution=1s&chart_type=price&theme=Navy&bg_color=0e1a1f&candle_up_color=18C722&candle_down_color=EF4444&show_symbol=1&show_grid_lines=1&show_volume=1`}
+                  onLoad={() => setChartReady(true)}
                   frameBorder="0"
                   allow="clipboard-write"
                   allowFullScreen

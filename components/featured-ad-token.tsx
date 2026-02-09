@@ -26,8 +26,8 @@ export function FeaturedAdToken({ index = 0 }: { index?: number }) {
 
     loadFeaturedToken()
 
-    // Refresh every 10 seconds
-    const interval = setInterval(loadFeaturedToken, 10000)
+    // Refresh every 3 seconds
+    const interval = setInterval(loadFeaturedToken, 3000)
     return () => clearInterval(interval)
   }, [index])
 

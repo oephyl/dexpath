@@ -25,7 +25,7 @@ export function DexpathInfo() {
         marketCap: prev.marketCap + (Math.random() - 0.5) * 10000,
         holders: prev.holders + Math.floor(Math.random() * 3),
       }))
-    }, 10000)
+    }, 3000)
 
     return () => clearInterval(interval)
   }, [])

@@ -1033,6 +1033,10 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   const [newTabHiddenDetails, setNewTabHiddenDetails] = useState<Record<string, boolean>>({})
   const [newTabDetailsDrawerToken, setNewTabDetailsDrawerToken] = useState<TokenRowRuntime | null>(null)
   const mobulaIntervalRef = useRef<number | null>(null)
+  const ctoIntervalRef = useRef<number | null>(null)
+  const boostIntervalRef = useRef<number | null>(null)
+  const dexPaidIntervalRef = useRef<number | null>(null)
+  const adsIntervalRef = useRef<number | null>(null)
   const mobulaInitialLoadedRef = useRef(false)
   const [ctoTokens, setCtoTokens] = useState<TokenRowRuntime[]>([])
   const [loadingCTO, setLoadingCTO] = useState(false)
@@ -1085,7 +1089,13 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   }, [trackingData])
 
   useEffect(() => {
-    if (activeTab !== "cto") return
+    if (activeTab !== "cto") {
+      if (ctoIntervalRef.current) {
+        window.clearInterval(ctoIntervalRef.current)
+        ctoIntervalRef.current = null
+      }
+      return
+    }
     let aborted = false
 
     const fetchCTO = async () => {
@@ -1184,9 +1194,16 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     }
 
     fetchCTO()
+    ctoIntervalRef.current = window.setInterval(() => {
+      fetchCTO()
+    }, 3000)
 
     return () => {
       aborted = true
+      if (ctoIntervalRef.current) {
+        window.clearInterval(ctoIntervalRef.current)
+        ctoIntervalRef.current = null
+      }
     }
   }, [activeTab])
 
@@ -1296,7 +1313,7 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     fetchMobulaPulse(true)
     mobulaIntervalRef.current = window.setInterval(() => {
       fetchMobulaPulse(false)
-    }, 10000)
+    }, 3000)
 
     return () => {
       if (mobulaIntervalRef.current) {
@@ -1314,7 +1331,13 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
   }
 
   useEffect(() => {
-    if (activeTab !== "boost") return
+    if (activeTab !== "boost") {
+      if (boostIntervalRef.current) {
+        window.clearInterval(boostIntervalRef.current)
+        boostIntervalRef.current = null
+      }
+      return
+    }
     let aborted = false
 
     const fetchBoostTokens = async () => {
@@ -1389,14 +1412,27 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     }
 
     fetchBoostTokens()
+    boostIntervalRef.current = window.setInterval(() => {
+      fetchBoostTokens()
+    }, 3000)
 
     return () => {
       aborted = true
+      if (boostIntervalRef.current) {
+        window.clearInterval(boostIntervalRef.current)
+        boostIntervalRef.current = null
+      }
     }
   }, [activeTab, boostFilter, boostRefreshTick])
 
   useEffect(() => {
-    if (activeTab !== "dexpaid") return
+    if (activeTab !== "dexpaid") {
+      if (dexPaidIntervalRef.current) {
+        window.clearInterval(dexPaidIntervalRef.current)
+        dexPaidIntervalRef.current = null
+      }
+      return
+    }
     let aborted = false
 
     const fetchDexPaid = async () => {
@@ -1464,14 +1500,27 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     }
 
     fetchDexPaid()
+    dexPaidIntervalRef.current = window.setInterval(() => {
+      fetchDexPaid()
+    }, 3000)
 
     return () => {
       aborted = true
+      if (dexPaidIntervalRef.current) {
+        window.clearInterval(dexPaidIntervalRef.current)
+        dexPaidIntervalRef.current = null
+      }
     }
   }, [activeTab])
 
   useEffect(() => {
-    if (activeTab !== "ads") return
+    if (activeTab !== "ads") {
+      if (adsIntervalRef.current) {
+        window.clearInterval(adsIntervalRef.current)
+        adsIntervalRef.current = null
+      }
+      return
+    }
     let aborted = false
 
     const fetchAds = async () => {
@@ -1560,9 +1609,16 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
     }
 
     fetchAds()
+    adsIntervalRef.current = window.setInterval(() => {
+      fetchAds()
+    }, 3000)
 
     return () => {
       aborted = true
+      if (adsIntervalRef.current) {
+        window.clearInterval(adsIntervalRef.current)
+        adsIntervalRef.current = null
+      }
     }
   }, [activeTab])
 
@@ -1608,8 +1664,9 @@ export function TokenTable({ tokens: initialTokens, newestTokenAddress, searchQu
 
   const getTimeAgo = (dateString: string) => {
     const diff = Date.now() - new Date(dateString).getTime()
-    const minutes = Math.floor(diff / 60000)
-    if (minutes < 1) return "just now"
+    const seconds = Math.floor(diff / 1000)
+    if (seconds < 60) return `${seconds}s`
+    const minutes = Math.floor(seconds / 60)
     if (minutes < 60) return `${minutes}m ago`
     const hours = Math.floor(minutes / 60)
     if (hours < 24) return `${hours}h ago`

@@ -60,18 +60,18 @@ export function DexpathInfo() {
 
         <div className="flex gap-1">
           <Button variant="outline" size="sm" className="flex-1 h-6 text-[9px] bg-transparent" asChild>
-            <a href="https://x.com/dexpath" target="_blank" rel="noopener noreferrer">
+            <a href="https://x.com/DexpathApp" target="_blank" rel="noopener noreferrer">
               <ExternalLink className="h-2.5 w-2.5 mr-1" />X
             </a>
           </Button>
           <Button variant="outline" size="sm" className="flex-1 h-6 text-[9px] bg-transparent" asChild>
-            <a href="https://discord.gg/dexpath" target="_blank" rel="noopener noreferrer">
+            <a href="https://discord.gg/kcUsPgEAqf" target="_blank" rel="noopener noreferrer">
               <ExternalLink className="h-2.5 w-2.5 mr-1" />
               Discord
             </a>
           </Button>
           <Button variant="outline" size="sm" className="flex-1 h-6 text-[9px] bg-transparent" asChild>
-            <a href="https://t.me/dexpath" target="_blank" rel="noopener noreferrer">
+            <a href="https://t.me/dexpathapp" target="_blank" rel="noopener noreferrer">
               <ExternalLink className="h-2.5 w-2.5 mr-1" />
               Telegram
             </a>

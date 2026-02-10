@@ -49,22 +49,7 @@ export function DexpathInfo() {
           <div className="flex-1">
             <h3 className="text-sm font-bold text-primary">$DEXPATH</h3>
           </div>
-        </div>
-
-        <div className="flex items-center justify-between text-[9px] gap-2">
-          <div>
-            <span className="text-muted-foreground">Price: </span>
-            <span className="font-semibold">${tokenData.price.toFixed(4)}</span>
-          </div>
-          <div className={tokenData.change24h > 0 ? "text-green-500" : "text-red-500"}>
-            {tokenData.change24h > 0 ? "+" : ""}
-            {tokenData.change24h.toFixed(1)}%
-          </div>
-          <div>
-            <span className="text-muted-foreground">MCap: </span>
-            <span className="font-semibold">${(tokenData.marketCap / 1000000).toFixed(2)}M</span>
-          </div>
-        </div>
+        </div> 
 
         <div className="flex items-center gap-1 bg-background/50 rounded px-2 py-1">
           <code className="flex-1 text-[9px] font-mono truncate text-muted-foreground">{contractAddress}</code>

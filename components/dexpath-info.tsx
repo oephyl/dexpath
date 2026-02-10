@@ -15,7 +15,7 @@ export function DexpathInfo() {
     holders: 1247,
   })
 
-  const contractAddress = "DexPathxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxpump"
+  const contractAddress = "GmS9k9Zh1AuSBxHqVKTPd8NGoGU2vjCeNU1u6zLzpump"
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -80,7 +80,7 @@ export function DexpathInfo() {
 
         <Button className="w-full h-7 bg-primary hover:bg-primary/90 text-black font-bold text-[10px]" asChild>
           <a
-            href="https://pump.fun/coin/DexPathSoL8NAxxxxxxxxxxxxxxxxxxxxxxxxxxpump"
+            href="https://pump.fun/coin/GmS9k9Zh1AuSBxHqVKTPd8NGoGU2vjCeNU1u6zLzpump"
             target="_blank"
             rel="noopener noreferrer"
           >

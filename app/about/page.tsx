@@ -406,7 +406,7 @@ export default function AboutPage() {
               </Link>
             </div>
             <div className="flex flex-wrap gap-3 justify-center">
-              <Link href="https://discord.gg/dexpath" target="_blank">
+              <Link href="https://discord.gg/kcUsPgEAqf" target="_blank">
                 <Badge
                   variant="outline"
                   className="px-4 py-2 bg-[#5865F2]/20 text-[#5865F2] border-[#5865F2]/30 hover:bg-[#5865F2]/30 cursor-pointer"
@@ -414,7 +414,7 @@ export default function AboutPage() {
                   Discord
                 </Badge>
               </Link>
-              <Link href="https://t.me/dexpath" target="_blank">
+              <Link href="https://t.me/dexpathapp" target="_blank">
                 <Badge
                   variant="outline"
                   className="px-4 py-2 bg-[#0088cc]/20 text-[#0088cc] border-[#0088cc]/30 hover:bg-[#0088cc]/30 cursor-pointer"
@@ -422,7 +422,7 @@ export default function AboutPage() {
                   Telegram
                 </Badge>
               </Link>
-              <Link href="https://x.com/dexpath" target="_blank">
+              <Link href="https://x.com/DexpathApp" target="_blank">
                 <Badge
                   variant="outline"
                   className="px-4 py-2 bg-black/20 text-foreground border-border hover:bg-black/30 cursor-pointer"

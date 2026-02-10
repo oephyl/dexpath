@@ -1089,17 +1089,17 @@ export default function DocsPage() {
               us on X for platform updates and market insights.
             </p>
             <div className="flex flex-wrap gap-3 justify-center mb-6">
-              <Link href="https://discord.gg/dexpath" target="_blank">
+              <Link href="https://discord.gg/kcUsPgEAqf" target="_blank">
                 <button className="px-5 py-2.5 bg-[#5865F2] hover:bg-[#4752C4] text-white rounded-lg font-semibold text-sm transition-colors">
                   Join Discord
                 </button>
               </Link>
-              <Link href="https://t.me/dexpath" target="_blank">
+              <Link href="https://t.me/dexpathapp" target="_blank">
                 <button className="px-5 py-2.5 bg-[#0088cc] hover:bg-[#006699] text-white rounded-lg font-semibold text-sm transition-colors">
                   Join Telegram
                 </button>
               </Link>
-              <Link href="https://x.com/dexpath" target="_blank">
+              <Link href="https://x.com/DexpathApp" target="_blank">
                 <button className="px-5 py-2.5 bg-black hover:bg-black/80 text-white rounded-lg font-semibold text-sm transition-colors">
                   Follow on X
                 </button>

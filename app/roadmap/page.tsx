@@ -324,17 +324,17 @@ export default function RoadmapPage() {
                 Have suggestions for features? Join our community and share your ideas:
               </p>
               <div className="flex flex-wrap gap-3 justify-center">
-                <a href="https://discord.gg/dexpath" target="_blank" rel="noopener noreferrer">
+                <a href="https://discord.gg/kcUsPgEAqf" target="_blank" rel="noopener noreferrer">
                   <button className="px-5 py-2 bg-[#5865F2] hover:bg-[#4752C4] text-white rounded-lg font-semibold text-sm transition-colors">
                     Discord
                   </button>
                 </a>
-                <a href="https://t.me/dexpath" target="_blank" rel="noopener noreferrer">
+                <a href="https://t.me/dexpathapp" target="_blank" rel="noopener noreferrer">
                   <button className="px-5 py-2 bg-[#0088cc] hover:bg-[#006699] text-white rounded-lg font-semibold text-sm transition-colors">
                     Telegram
                   </button>
                 </a>
-                <a href="https://x.com/dexpath" target="_blank" rel="noopener noreferrer">
+                <a href="https://x.com/DexpathApp" target="_blank" rel="noopener noreferrer">
                   <button className="px-5 py-2 bg-black hover:bg-black/80 text-white rounded-lg font-semibold text-sm transition-colors">
                     X (Twitter)
                   </button>
